@@ -544,12 +544,14 @@ export function createServer(): McpServer {
       assignment_id: id,
       include: z.array(z.string()).default(["submission_comments", "rubric_assessment"]),
     }),
-    async ({ course_id, assignment_id, include }, client) =>
-      (await client.get(
+    async ({ course_id, assignment_id, include }, client) => {
+      client.requireTeacherMode();
+      return (await client.get(
         apiPath("courses", course_id, "assignments", assignment_id, "submissions"),
         { include, per_page: 100 },
         true,
-      )).data,
+      )).data;
+    },
   );
 
   tool(
@@ -632,12 +634,17 @@ export function createServer(): McpServer {
     }),
     async ({ course_id, student_ref, body, subject }, client) => {
       const userId = await client.resolveStudentRef(course_id, student_ref);
-      return (await client.post("/api/v1/conversations", {
+      const result = await client.post<Record<string, unknown>>("/api/v1/conversations", {
         recipients: [userId],
         body,
         subject,
         context_code: `course_${course_id}`,
-      })).data;
+      });
+      return {
+        sent: true,
+        student_ref,
+        conversation_id: result.data.id,
+      };
     },
   );
 
