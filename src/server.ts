@@ -224,7 +224,7 @@ export function createServer(): McpServer {
     z.object({
       course_id: id,
       assignment_id: id,
-      url: z.url(),
+      url: z.string().url(),
       comment: z.string().optional(),
     }),
     async ({ course_id, assignment_id, url, comment }, client) =>
