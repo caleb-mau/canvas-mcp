@@ -529,6 +529,120 @@ export function createServer(): McpServer {
 
   tool(
     server,
+    "canvas_teacher_list_students",
+    "List students in a course using stable pseudonymous student_ref values. Real names, emails, login IDs, SIS IDs, avatar URLs, and raw Canvas user IDs are not returned.",
+    z.object({ course_id: id }),
+    async ({ course_id }, client) => client.teacherStudents(course_id),
+  );
+
+  tool(
+    server,
+    "canvas_teacher_list_submissions",
+    "List submissions for an assignment in teacher mode. Student identities are replaced with stable course scoped student_ref aliases before the data reaches the model.",
+    z.object({
+      course_id: id,
+      assignment_id: id,
+      include: z.array(z.string()).default(["submission_comments", "rubric_assessment"]),
+    }),
+    async ({ course_id, assignment_id, include }, client) =>
+      (await client.get(
+        apiPath("courses", course_id, "assignments", assignment_id, "submissions"),
+        { include, per_page: 100 },
+        true,
+      )).data,
+  );
+
+  tool(
+    server,
+    "canvas_teacher_get_submission",
+    "Get one student's assignment submission using only its pseudonymous student_ref. The server resolves the alias to the real Canvas user locally and redacts the response.",
+    z.object({
+      course_id: id,
+      assignment_id: id,
+      student_ref: z.string().startsWith("student_"),
+      include: z.array(z.string()).default(["submission_comments", "rubric_assessment", "submission_history"]),
+    }),
+    async ({ course_id, assignment_id, student_ref, include }, client) => {
+      const userId = await client.resolveStudentRef(course_id, student_ref);
+      return (await client.get(
+        apiPath("courses", course_id, "assignments", assignment_id, "submissions", userId),
+        { include },
+      )).data;
+    },
+  );
+
+  tool(
+    server,
+    "canvas_teacher_grade_submission",
+    "Grade, excuse, set late state, or comment on a student's submission by student_ref. The real Canvas user ID is resolved only inside the server.",
+    z.object({
+      course_id: id,
+      assignment_id: id,
+      student_ref: z.string().startsWith("student_"),
+      posted_grade: z.string().optional(),
+      comment: z.string().optional(),
+      excuse: z.boolean().optional(),
+      late_policy_status: z.enum(["late", "missing", "extended", "none"]).nullable().optional(),
+      seconds_late_override: z.number().int().min(0).optional(),
+    }).refine(
+      (value) =>
+        value.posted_grade !== undefined ||
+        value.comment !== undefined ||
+        value.excuse !== undefined ||
+        value.late_policy_status !== undefined ||
+        value.seconds_late_override !== undefined,
+      { message: "Provide at least one grading or comment change." },
+    ),
+    async ({
+      course_id,
+      assignment_id,
+      student_ref,
+      posted_grade,
+      comment,
+      excuse,
+      late_policy_status,
+      seconds_late_override,
+    }, client) => {
+      const userId = await client.resolveStudentRef(course_id, student_ref);
+      const submission: Record<string, unknown> = {};
+      if (posted_grade !== undefined) submission.posted_grade = posted_grade;
+      if (excuse !== undefined) submission.excuse = excuse;
+      if (late_policy_status !== undefined) submission.late_policy_status = late_policy_status;
+      if (seconds_late_override !== undefined) submission.seconds_late_override = seconds_late_override;
+
+      return (await client.put(
+        apiPath("courses", course_id, "assignments", assignment_id, "submissions", userId),
+        {
+          ...(Object.keys(submission).length ? { submission } : {}),
+          ...(comment !== undefined ? { comment: { text_comment: comment } } : {}),
+        },
+      )).data;
+    },
+  );
+
+  tool(
+    server,
+    "canvas_teacher_message_student",
+    "Send a Canvas Inbox message to a pseudonymous student_ref without exposing the student's real Canvas user ID to the model.",
+    z.object({
+      course_id: id,
+      student_ref: z.string().startsWith("student_"),
+      body: z.string().min(1),
+      subject: z.string().optional(),
+    }),
+    async ({ course_id, student_ref, body, subject }, client) => {
+      const userId = await client.resolveStudentRef(course_id, student_ref);
+      return (await client.post("/api/v1/conversations", {
+        recipients: [userId],
+        body,
+        subject,
+        context_code: `course_${course_id}`,
+      })).data;
+    },
+  );
+
+  tool(
+    server,
     "canvas_api",
     "Low level Canvas REST escape hatch. Supports any same origin /api/... route. GET is always allowed. Mutations obey CANVAS_WRITE_MODE.",
     z.object({
