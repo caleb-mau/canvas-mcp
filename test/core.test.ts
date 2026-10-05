@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createHash } from "node:crypto";
 import { CanvasClient, toFormBody } from "../src/canvas";
-import { confirmationRequired, normalizeBaseUrl } from "../src/config";
+import { normalizeBaseUrl } from "../src/config";
 import { bearerTokenMatches } from "../src/http";
+import { canvasToolAnnotations } from "../src/server";
 import {
   authorizationServerMetadata,
   CHATGPT_CIMD_CLIENT_ID,
@@ -120,23 +121,6 @@ test("teacher mode blocks account level writes", async () => {
   );
 });
 
-
-test("explicit Canvas confirmation is on by default", () => {
-  const previous = process.env.CANVAS_REQUIRE_CONFIRMATION;
-  try {
-    delete process.env.CANVAS_REQUIRE_CONFIRMATION;
-    assert.equal(confirmationRequired(), true);
-
-    process.env.CANVAS_REQUIRE_CONFIRMATION = "false";
-    assert.equal(confirmationRequired(), false);
-
-    process.env.CANVAS_REQUIRE_CONFIRMATION = "true";
-    assert.equal(confirmationRequired(), true);
-  } finally {
-    if (previous === undefined) delete process.env.CANVAS_REQUIRE_CONFIRMATION;
-    else process.env.CANVAS_REQUIRE_CONFIRMATION = previous;
-  }
-});
 
 
 test("OAuth metadata advertises ChatGPT compatible PKCE flow", () => {
@@ -318,4 +302,37 @@ test("remote file references download without Canvas credentials and upload to C
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+
+test("Canvas tool annotations classify reads and consequential writes", () => {
+  assert.deepEqual(canvasToolAnnotations("canvas_get_assignment"), {
+    readOnlyHint: true,
+    destructiveHint: false,
+    openWorldHint: false,
+  });
+
+  assert.deepEqual(canvasToolAnnotations("canvas_submit_text"), {
+    readOnlyHint: false,
+    destructiveHint: true,
+    openWorldHint: false,
+  });
+
+  assert.deepEqual(canvasToolAnnotations("canvas_submit_file"), {
+    readOnlyHint: false,
+    destructiveHint: true,
+    openWorldHint: true,
+  });
+
+  assert.deepEqual(canvasToolAnnotations("canvas_mark_module_item"), {
+    readOnlyHint: false,
+    destructiveHint: false,
+    openWorldHint: false,
+    idempotentHint: true,
+  });
+
+  assert.throws(
+    () => canvasToolAnnotations("unclassified_tool"),
+    /Missing Canvas tool annotations/,
+  );
 });
