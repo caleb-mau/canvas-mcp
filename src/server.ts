@@ -164,7 +164,17 @@ function tool(
   inputSchema: z.ZodType,
   handler: (args: any, client: CanvasClient) => Promise<unknown>,
 ): void {
-  server.registerTool(name, { description, inputSchema }, async (args, ctx) => {
+  server.registerTool(
+    name,
+    {
+      description,
+      inputSchema,
+      securitySchemes: [{ type: "oauth2", scopes: ["mcp"] }],
+      _meta: {
+        securitySchemes: [{ type: "oauth2", scopes: ["mcp"] }],
+      },
+    },
+    async (args, ctx) => {
     try {
       const client = new CanvasClient(await loadConfig());
       const message = await confirmationMessage(name, args, client);
@@ -214,6 +224,10 @@ export function createServer(): McpServer {
     {
       description: "Verify the Canvas connection and show local configuration with the access token redacted.",
       inputSchema: z.object({}),
+      securitySchemes: [{ type: "oauth2", scopes: ["mcp"] }],
+      _meta: {
+        securitySchemes: [{ type: "oauth2", scopes: ["mcp"] }],
+      },
     },
     async () => {
       try {
