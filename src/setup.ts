@@ -17,6 +17,11 @@ async function testCredentials(config: StoredConfig): Promise<unknown> {
     writeMode: config.writeMode || "student",
     maxPages: config.maxPages || 20,
     timeoutMs: config.timeoutMs || 30_000,
+    redactionKey:
+      process.env.CANVAS_REDACTION_KEY?.trim() ||
+      process.env.MCP_AUTH_TOKEN?.trim() ||
+      config.redactionKey?.trim() ||
+      config.accessToken.trim(),
   });
   return (await client.get("/api/v1/users/self/profile")).data;
 }
