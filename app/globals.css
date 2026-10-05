@@ -1,0 +1,126 @@
+:root {
+  color-scheme: light dark;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #0a0a0a;
+  color: #f5f5f5;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 20% 0%, #232323 0, transparent 38rem),
+    #0a0a0a;
+}
+
+.shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 40px 20px;
+}
+
+.card {
+  width: min(880px, 100%);
+  border: 1px solid #2b2b2b;
+  border-radius: 24px;
+  background: rgba(18, 18, 18, 0.9);
+  padding: clamp(28px, 5vw, 54px);
+  box-shadow: 0 30px 100px rgba(0, 0, 0, 0.34);
+}
+
+.eyebrow {
+  font-size: 0.8rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: #a3a3a3;
+}
+
+h1 {
+  margin: 12px 0 16px;
+  font-size: clamp(2.2rem, 6vw, 4.6rem);
+  line-height: 0.98;
+  letter-spacing: -0.055em;
+}
+
+h2 {
+  margin: 0 0 10px;
+  font-size: 1rem;
+}
+
+.lead {
+  max-width: 700px;
+  color: #c8c8c8;
+  font-size: 1.08rem;
+  line-height: 1.65;
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 28px 0;
+  padding: 13px 15px;
+  border: 1px solid #2b2b2b;
+  border-radius: 12px;
+  background: #0d0d0d;
+  color: #d5d5d5;
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #777;
+}
+
+.dot.ready { background: #4ade80; }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin: 24px 0 32px;
+}
+
+.grid > div {
+  border: 1px solid #2b2b2b;
+  border-radius: 14px;
+  padding: 18px;
+}
+
+code {
+  display: block;
+  overflow-wrap: anywhere;
+  color: #e8e8e8;
+  font-size: 0.9rem;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chips span {
+  border: 1px solid #303030;
+  border-radius: 999px;
+  padding: 7px 10px;
+  color: #cfcfcf;
+  background: #111;
+  font-size: 0.86rem;
+}
+
+.foot {
+  margin: 32px 0 0;
+  color: #8f8f8f;
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+@media (max-width: 650px) {
+  .grid { grid-template-columns: 1fr; }
+}
