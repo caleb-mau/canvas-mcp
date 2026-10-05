@@ -31,7 +31,17 @@ A useful report should include:
 
 Teacher mode is designed to pseudonymize known Canvas student identity fields before responses reach an MCP model.
 
+Pseudonymous `student_ref` values are not claimed to make a record legally de identified under FERPA. Course aliases are deliberately scoped to reduce unnecessary correlation, and no alias mapping database is stored.
+
 It is not a general purpose data loss prevention system. Free form content can contain personal information that Canvas does not separately identify, such as a phone number or home address typed by a student. Do not assume teacher mode can detect arbitrary unknown personal data.
+
+## Education record handling
+
+The application does not intentionally log Canvas response bodies, student submissions, grades, messages, or roster payloads. Hosted MCP responses are marked `Cache-Control: no-store`.
+
+Infrastructure providers and MCP or AI clients can have independent logging and retention behavior. Those systems must be evaluated separately for real education record use.
+
+See [PRIVACY.md](PRIVACY.md).
 
 ## Supported versions
 

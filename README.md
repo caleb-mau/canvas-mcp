@@ -1,41 +1,82 @@
 # canvas-mcp
 
-A self hosted Model Context Protocol server for Canvas LMS.
+A self hosted MCP server for Canvas LMS.
 
-Canvas MCP connects an MCP client directly to your own Canvas account. It can run locally over stdio or remotely over Streamable HTTP on Vercel or another Next.js host.
+Connect ChatGPT, Claude, or another MCP client to your own Canvas account. Read courses, assignments, grades, modules, files, discussions, announcements, Inbox messages, and more. Submit work when you explicitly choose to.
 
-There is no Canvas OAuth flow, no hosted account system, and no shared database. You create a personal access token inside Canvas, configure your own instance, and your MCP client can use whatever Canvas permissions that token already has.
+No Canvas OAuth is required for the normal self hosted setup. You create a personal Canvas access token, keep it on your own machine or deployment, and give your MCP client a separate token for access to the MCP server.
 
-## What it can do
+## The important safety rule
 
-First class tools are included for:
+**Drafting is not submitting.**
 
-* Courses
-* Assignments and assignment descriptions
-* Grades and recently graded work
-* Current and historical submissions
-* Text submissions
-* URL submissions
-* File uploads and file submissions
-* Modules and module completion state
-* Course pages
-* Discussions and replies
-* Course files and local file downloads
-* Announcements
-* Calendar events
-* Planner items
-* Activity stream
-* Canvas Inbox conversations
-* Classic quizzes
-* Privacy preserving teacher roster, submission, grading, and messaging tools
+If you ask an AI to read an assignment, solve it, draft a response, rewrite it, review it, or finish the writing, Canvas MCP does not submit anything.
 
-In teacher mode, course scoped responses from both dedicated tools and `canvas_api` pass through the same student identity redaction layer.\n\nThe `canvas_api` tool is also a low level escape hatch for any same origin Canvas REST endpoint under `/api/...`. That means uncommon district features and Canvas endpoints do not need to be individually wrapped before an MCP client can use them.
+Submission tools are only intended to be called after you explicitly ask to **submit** or **turn in** the work. Even then, the server asks the end user for confirmation before changing Canvas.
 
-Canvas permissions are still the final authority. The MCP cannot do anything the configured Canvas account is not allowed to do.
+The same confirmation protection applies by default to grading, Canvas Inbox messages, discussion posts, and raw mutating Canvas API calls.
 
-## Get your Canvas access token
+If the connected MCP client cannot complete the confirmation request, the protected write does not continue.
 
-In Canvas:
+You can disable this advanced safety default with:
+
+```
+CANVAS_REQUIRE_CONFIRMATION=false
+```
+
+## Fastest setup: Vercel
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fcaleb-mau%2Fcanvas-mcp&env=CANVAS_BASE_URL%2CCANVAS_ACCESS_TOKEN%2CMCP_AUTH_TOKEN%2CCANVAS_WRITE_MODE)
+
+Set these values in the deployment:
+
+| Variable | What it is |
+| --- | --- |
+| `CANVAS_BASE_URL` | Your Canvas domain, such as `https://school.instructure.com` |
+| `CANVAS_ACCESS_TOKEN` | Personal token created inside Canvas |
+| `MCP_AUTH_TOKEN` | A separate random secret used by your MCP client |
+| `CANVAS_WRITE_MODE` | Usually `student`, `teacher`, `read_only`, or `full` |
+
+After deployment, your MCP endpoint is:
+
+```
+https://your-deployment.example/mcp
+```
+
+### ChatGPT
+
+ChatGPT currently expects OAuth for authenticated custom MCP connections.
+
+Canvas MCP includes a small built in OAuth 2.1 compatibility layer, so you do not need Auth0, Clerk, a database, or a separate OAuth provider.
+
+In ChatGPT:
+
+1. Add your deployed MCP URL, for example `https://your-deployment.example/mcp`
+2. Choose OAuth authentication
+3. ChatGPT discovers the OAuth endpoints automatically
+4. A Canvas MCP authorization page opens
+5. Enter the same `MCP_AUTH_TOKEN` you configured in Vercel
+6. Approve the connection
+
+There is no OAuth client ID or client secret for you to configure. ChatGPT identifies itself using its own Client ID Metadata Document and uses PKCE.
+
+Canvas authentication is unchanged. The server still uses `CANVAS_ACCESS_TOKEN` privately to talk to Canvas.
+
+### Other MCP clients
+
+Clients that support a normal bearer token can skip the OAuth browser flow and authenticate directly with:
+
+```
+Authorization: Bearer YOUR_MCP_AUTH_TOKEN
+```
+
+The OAuth layer and the direct bearer path protect the same self hosted MCP instance.
+
+That is it. The Canvas token stays on the server. The MCP caller never receives the Canvas token.
+
+## Get a Canvas access token
+
+Inside Canvas:
 
 1. Open **Account**
 2. Open **Settings**
@@ -43,77 +84,43 @@ In Canvas:
 4. Choose **New Access Token**
 5. Create a token and copy it
 
-Your Canvas base URL is the normal domain you use to access Canvas, for example:
+Use your normal Canvas origin as `CANVAS_BASE_URL`.
+
+Good:
 
 ```
 https://school.instructure.com
 ```
 
-Do not include `/profile/settings` or another page path.
-
-Treat the Canvas access token like a password.
-
-## Option 1: Deploy to Vercel
-
-This is the easiest remote setup.
-
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fcaleb-mau%2Fcanvas-mcp&env=CANVAS_BASE_URL%2CCANVAS_ACCESS_TOKEN%2CMCP_AUTH_TOKEN%2CCANVAS_WRITE_MODE)
-
-Set these environment variables:
-
-| Variable | Required | Purpose |
-| --- | --- | --- |
-| `CANVAS_BASE_URL` | yes | Your Canvas origin |
-| `CANVAS_ACCESS_TOKEN` | yes | Personal token created in Canvas settings |
-| `MCP_AUTH_TOKEN` | yes for remote mode | Secret used by your MCP client to authenticate to this server |
-| `CANVAS_WRITE_MODE` | no | `read_only`, `student`, `teacher`, or `full`. Default is `student` |
-| `CANVAS_MAX_PAGES` | no | Maximum Canvas pagination pages followed per tool call. Default is 20 |
-| `CANVAS_TIMEOUT_MS` | no | Canvas request timeout. Default is 30000 |
-| `CANVAS_REDACTION_KEY` | no | Optional secret used for stable teacher mode student aliases. Remote deployments fall back to `MCP_AUTH_TOKEN`; local mode falls back to the Canvas token |
-
-Generate `MCP_AUTH_TOKEN` as a long random secret. It is not your Canvas token.
-
-After deployment, the remote MCP endpoint is:
+Do not use:
 
 ```
-https://your-deployment.example/mcp
+https://school.instructure.com/profile/settings
 ```
 
-Remote clients authenticate with:
+Treat the Canvas token like a password.
 
-```
-Authorization: Bearer YOUR_MCP_AUTH_TOKEN
-```
-
-The Canvas access token remains stored on the deployment and is never sent to the MCP caller.
-
-The remote endpoint is stateless. It does not need Redis, sticky sessions, or a database.
-
-## Option 2: Run locally over stdio
+## Run locally instead
 
 Requirements:
 
 * Node.js 20 or newer
 * npm
-* An MCP client that can launch a local process
-
-Install:
 
 ```bash
 git clone https://github.com/caleb-mau/canvas-mcp.git
 cd canvas-mcp
 npm install
-npm run build
 npm run setup
 ```
 
-For a local browser configuration screen:
+Optional local browser setup:
 
 ```bash
 npm run setup:web
 ```
 
-Then configure your MCP client to launch:
+Example local MCP configuration:
 
 ```json
 {
@@ -127,102 +134,165 @@ Then configure your MCP client to launch:
 }
 ```
 
-During development:
+## What it can do
 
-```bash
-npm run dev:stdio
-```
+Dedicated tools cover common Canvas work:
 
-## Local configuration
+* Courses
+* Assignments and assignment instructions
+* Grades and recently graded work
+* Submission history
+* Text submissions
+* URL submissions
+* File uploads and submissions
+* Modules and module completion
+* Pages
+* Discussions and replies
+* Course files and downloads
+* Announcements
+* Calendar events
+* Planner items
+* Activity stream
+* Canvas Inbox
+* Classic quizzes
+* Teacher rosters, submissions, grading, and messaging
 
-The terminal and browser setup commands save a local config file, normally:
+There is also a low level `canvas_api` tool for Canvas REST endpoints that do not have a dedicated tool.
 
-```
-~/.config/canvas-mcp/config.json
-```
-
-Environment variables override values in that file.
-
-The browser setup page binds only to `127.0.0.1` and tests the Canvas connection before saving.
+GET requests are read only. Raw mutating calls require confirmation by default and still obey the configured write mode.
 
 ## Write modes
 
 ### `read_only`
 
-Blocks all Canvas mutations.
+Reads Canvas. Blocks writes.
 
 ### `student`
 
-Default mode. Allows normal student actions such as:
+The normal student mode. Allows student actions such as submissions, discussion posts, and Canvas Inbox messages.
 
-* Submit assignments
-* Upload submission files
-* Post discussion entries and replies
-* Send Canvas Inbox messages
-* Mark supported module state
-
-The low level `canvas_api` tool is prevented from making arbitrary teacher or administrator mutations in this mode.
+Teacher and administrator mutations are blocked.
 
 ### `teacher`
 
-Allows course and section level teacher actions such as grading, comments, assignment management, discussions, and other course scoped Canvas mutations.
+Allows course level teacher actions while automatically pseudonymizing known student identities before results reach the model.
 
-Teacher mode also turns on student identity pseudonymization. Before a Canvas response reaches the MCP model, known student identity fields are replaced with stable aliases such as:
+Instead of a real student identity, the model sees a stable reference such as:
 
 ```
 student_R7K4Q2M8PZ
 ```
 
-The server builds these aliases with HMAC SHA 256 using a private server side redaction key. The model does not receive the student's real Canvas user ID, name, email, login ID, SIS ID, or avatar URL.
+When the model grades or messages that student, the server resolves the alias to the real Canvas user internally.
 
-Dedicated teacher tools accept `student_ref` instead of a Canvas user ID. When the model grades, comments on, or messages a student, the server fetches the roster, recomputes the aliases, resolves the matching real user ID internally, and then calls Canvas. No alias database is required.
+Known names, emails, login IDs, SIS IDs, avatar URLs, and raw Canvas user IDs are removed or replaced before teacher mode results are returned.
 
-Aliases are stable within a course as long as the redaction key stays the same. Global student aliases are used when a Canvas response does not belong to one course.
+No alias database is required. Aliases are derived with HMAC from the server side redaction key. Course data uses course scoped aliases. Teacher responses outside a specific course use context scoped aliases rather than a universal student identifier.
 
-The privacy layer also scans returned strings for known roster identifiers so names or emails repeated inside ordinary Canvas response fields are replaced when recognized.
+The teacher roster also follows a minimum necessary default: grades and activity history are omitted unless `include_academic_context` is explicitly requested.
 
-This is identity redaction, not magical detection of every possible piece of personal information. If a student types an unknown phone number, home address, or other personal detail into free form assignment content, the server may not know that value is identifying and cannot guarantee its removal.
-
-Teacher mode blocks account level administrative mutations. Use `full` only when that broader access is intentional.
+Teacher mode is identity protection, not a general data loss prevention system. Free form student content can still contain personal information that Canvas does not identify separately.
 
 ### `full`
 
-Allows the low level API tool to make any same origin Canvas REST request supported by the configured token.
+Allows arbitrary same origin Canvas REST mutations permitted by the configured Canvas token.
 
-Full mode does not automatically apply teacher identity pseudonymization. Use it only when you intentionally want the full permission and data surface of the Canvas account.
+Use this only when you intentionally want the full Canvas permission surface.
+
+## FERPA conscious workflows
+
+Canvas MCP is designed to make privacy preserving workflows easier without requiring a student database.
+
+Teacher mode pseudonymizes known student identities, keeps mappings stateless, minimizes roster data by default, avoids application payload logging, and instructs remote clients and caches not to store MCP responses.
+
+This is deliberately described as **FERPA conscious**, not automatically **FERPA compliant**. Whether a real deployment satisfies FERPA depends on the school, the user's legitimate educational interest, district approval, the AI provider, hosting, retention terms, and how records are used.
+
+Pseudonymized student references are not represented as legally de identified records.
+
+See [PRIVACY.md](PRIVACY.md) for the full privacy design and no database architecture.
+
+## Confirmation behavior
+
+By default:
+
+```
+CANVAS_REQUIRE_CONFIRMATION=true
+```
+
+Confirmation protected actions include:
+
+* Assignment text submissions
+* Assignment URL submissions
+* Assignment file uploads and submissions
+* Discussion posts and replies
+* Canvas Inbox messages
+* Teacher grade changes and comments
+* Teacher messages
+* Any non GET request through `canvas_api`
+
+For file submissions, confirmation occurs **before the upload starts**.
+
+Small local state actions such as marking a module item complete are not currently confirmation gated.
 
 ## File submissions
 
-Canvas file submissions are not a normal single POST request. Canvas MCP implements the complete Canvas upload flow:
+Canvas file submissions use the real Canvas upload flow:
 
-1. Request an upload URL and parameters from Canvas
-2. Upload the file to the returned storage target
-3. Complete the upload with Canvas
+1. Ask Canvas for an upload target
+2. Upload the file to that target
+3. Complete the Canvas upload
 4. Submit the returned Canvas file ID to the assignment
 
-The Canvas token is only sent to the configured Canvas origin. It is not forwarded to external file storage hosts.
+The Canvas bearer token is never forwarded to an unrelated origin.
 
-## Raw Canvas API tool
+## Environment variables
 
-`canvas_api` accepts:
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `CANVAS_BASE_URL` | required | Canvas origin |
+| `CANVAS_ACCESS_TOKEN` | required | Personal Canvas access token |
+| `MCP_AUTH_TOKEN` | required for remote mode | Protects the remote MCP endpoint and acts as the single user secret for the built in OAuth flow |
+| `CANVAS_WRITE_MODE` | `student` | Permission boundary |
+| `CANVAS_REQUIRE_CONFIRMATION` | `true` | Requires end user confirmation for protected writes |
+| `CANVAS_MAX_PAGES` | `20` | Maximum Canvas pagination pages followed per call |
+| `CANVAS_TIMEOUT_MS` | `30000` | Canvas request timeout |
+| `CANVAS_REDACTION_KEY` | automatic fallback | Stable teacher mode aliases |
 
-* HTTP method
-* Canvas API path
-* Query parameters
-* Form or JSON body
-* Optional automatic pagination
+## How the built in OAuth works
 
-Example conceptual call:
+The OAuth layer exists for MCP clients such as ChatGPT that require OAuth discovery and an authorization code flow.
 
-```json
-{
-  "method": "GET",
-  "path": "/api/v1/courses/123/assignment_groups",
-  "paginate": true
-}
-```
+It publishes:
 
-Absolute URLs are accepted only when they match the configured Canvas origin. Cross origin credential forwarding is rejected.
+* Protected resource metadata
+* OAuth authorization server metadata
+* Authorization code flow
+* PKCE with S256
+* Short lived access tokens
+* Refresh tokens
+* The `resource` audience binding required by MCP authorization
+
+It is intentionally single user. The authorization page verifies `MCP_AUTH_TOKEN`, then the server issues signed OAuth tokens for that deployment.
+
+There is still no account database and no Canvas OAuth.
+
+Rotating `MCP_AUTH_TOKEN` immediately invalidates OAuth tokens signed with the old secret.
+
+## Security
+
+Never commit or post:
+
+* Canvas access tokens
+* MCP authentication tokens
+* Redaction keys
+* Local config files
+* Real student records
+
+If a Canvas token is exposed, revoke it in Canvas and create another one.
+
+If `MCP_AUTH_TOKEN` is exposed, rotate it on the deployment.
+
+See [SECURITY.md](SECURITY.md) for more.
 
 ## Development
 
@@ -232,27 +302,6 @@ npm test
 npm run typecheck
 npm run build
 ```
-
-The project uses:
-
-* TypeScript
-* MCP TypeScript SDK v2
-* Zod
-* Next.js for the optional remote HTTP deployment
-* Node stdio for local MCP clients
-
-## Security
-
-Never commit:
-
-* Canvas access tokens
-* MCP authentication tokens
-* Local config files
-* `.env` files
-
-For a remote deployment, use your hosting provider's encrypted environment variables.
-
-If a token is exposed, revoke or rotate it immediately.
 
 ## License
 

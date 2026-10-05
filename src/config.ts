@@ -56,6 +56,12 @@ function parseNumber(value: string | undefined, fallback: number, min: number, m
   return Math.floor(parsed);
 }
 
+export function confirmationRequired(): boolean {
+  const value = process.env.CANVAS_REQUIRE_CONFIRMATION?.trim().toLowerCase();
+  if (!value) return true;
+  return !["0", "false", "no", "off"].includes(value);
+}
+
 function parseWriteMode(value: string | undefined): WriteMode | undefined {
   if (!value) return undefined;
   if (value === "read_only" || value === "student" || value === "teacher" || value === "full") return value;
@@ -134,6 +140,7 @@ export function redactedConfig(config: CanvasMcpConfig) {
     maxPages: config.maxPages,
     timeoutMs: config.timeoutMs,
     privacyRedaction: config.writeMode === "teacher",
+    explicitConfirmation: confirmationRequired(),
     configPath: configPath(),
   };
 }

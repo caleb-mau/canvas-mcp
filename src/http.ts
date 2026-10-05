@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { createServer } from "./server";
+import { canonicalOrigin, validMcpBearer } from "./oauth";
 
 const handler = createMcpHandler(() => createServer());
 
@@ -8,12 +9,15 @@ export function bearerTokenMatches(header: string | null, expectedToken: string)
   if (!header) return false;
   const match = /^Bearer\s+(.+)$/i.exec(header.trim());
   if (!match) return false;
-
   const provided = Buffer.from(match[1], "utf8");
   const expected = Buffer.from(expectedToken, "utf8");
-  if (provided.length !== expected.length) return false;
+  return provided.length === expected.length && timingSafeEqual(provided, expected);
+}
 
-  return timingSafeEqual(provided, expected);
+function bearerValue(header: string | null): string | null {
+  if (!header) return null;
+  const match = /^Bearer\s+(.+)$/i.exec(header.trim());
+  return match ? match[1] : null;
 }
 
 export async function handleRemoteMcp(request: Request): Promise<Response> {
@@ -28,14 +32,22 @@ export async function handleRemoteMcp(request: Request): Promise<Response> {
     );
   }
 
+  const origin = canonicalOrigin(request);
   const authorization = request.headers.get("authorization");
-  if (!bearerTokenMatches(authorization, expectedToken)) {
+  const bearer = bearerValue(authorization);
+
+  if (!bearer || !validMcpBearer(bearer, origin)) {
+    const resourceMetadata =
+      origin + "/.well-known/oauth-protected-resource";
     return Response.json(
       { error: "Unauthorized" },
       {
         status: 401,
         headers: {
-          "WWW-Authenticate": 'Bearer realm="canvas-mcp"',
+          "WWW-Authenticate":
+            'Bearer resource_metadata="' +
+            resourceMetadata +
+            '", scope="mcp", error="invalid_token", error_description="OAuth authorization is required"',
           "Cache-Control": "no-store",
         },
       },
@@ -44,8 +56,8 @@ export async function handleRemoteMcp(request: Request): Promise<Response> {
 
   return handler.fetch(request, {
     authInfo: {
-      token: expectedToken,
-      clientId: "self-hosted-mcp-client",
+      token: bearer,
+      clientId: "oauth-or-self-hosted-client",
       scopes: ["mcp"],
     },
   });

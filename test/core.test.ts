@@ -1,8 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createHash } from "node:crypto";
 import { CanvasClient, toFormBody } from "../src/canvas";
-import { normalizeBaseUrl } from "../src/config";
+import { confirmationRequired, normalizeBaseUrl } from "../src/config";
 import { bearerTokenMatches } from "../src/http";
+import {
+  authorizationServerMetadata,
+  issueAccessToken,
+  issueAuthorizationCode,
+  oauthResource,
+  protectedResourceMetadata,
+  verifyPkce,
+  verifySignedToken,
+} from "../src/oauth";
 
 test("normalizeBaseUrl accepts a district hostname", () => {
   assert.equal(
@@ -81,6 +91,10 @@ test("teacher mode redacts roster identity fields", async () => {
     assert.equal(await client.resolveStudentRef("123", studentRef), "42");
     assert.ok(!JSON.stringify(roster).includes("Example Student"));
     assert.ok(!JSON.stringify(roster).includes("example_login"));
+    assert.equal("grades" in roster[0], false);
+
+    const expandedRoster = await client.teacherStudents("123", true);
+    assert.equal("grades" in expandedRoster[0], true);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -100,4 +114,77 @@ test("teacher mode blocks account level writes", async () => {
     () => client.put("/api/v1/accounts/1/courses/2", { course: { name: "Example" } }),
     /teacher blocks account-level or administrative mutation/
   );
+});
+
+
+test("explicit Canvas confirmation is on by default", () => {
+  const previous = process.env.CANVAS_REQUIRE_CONFIRMATION;
+  try {
+    delete process.env.CANVAS_REQUIRE_CONFIRMATION;
+    assert.equal(confirmationRequired(), true);
+
+    process.env.CANVAS_REQUIRE_CONFIRMATION = "false";
+    assert.equal(confirmationRequired(), false);
+
+    process.env.CANVAS_REQUIRE_CONFIRMATION = "true";
+    assert.equal(confirmationRequired(), true);
+  } finally {
+    if (previous === undefined) delete process.env.CANVAS_REQUIRE_CONFIRMATION;
+    else process.env.CANVAS_REQUIRE_CONFIRMATION = previous;
+  }
+});
+
+
+test("OAuth metadata advertises ChatGPT compatible PKCE flow", () => {
+  const origin = "https://canvas-mcp.example.invalid";
+  const resource = protectedResourceMetadata(origin);
+  const auth = authorizationServerMetadata(origin);
+
+  assert.equal(resource.resource, origin);
+  assert.deepEqual(resource.authorization_servers, [origin]);
+  assert.equal(auth.authorization_endpoint, origin + "/oauth/authorize");
+  assert.equal(auth.token_endpoint, origin + "/oauth/token");
+  assert.ok(auth.code_challenge_methods_supported.includes("S256"));
+  assert.equal(auth.client_id_metadata_document_supported, true);
+  assert.ok(auth.grant_types_supported.includes("refresh_token"));
+});
+
+test("OAuth authorization codes are bound to PKCE and the MCP resource", () => {
+  const previous = process.env.MCP_AUTH_TOKEN;
+  process.env.MCP_AUTH_TOKEN = "unit-test-mcp-secret";
+
+  try {
+    const origin = "https://canvas-mcp.example.invalid";
+    const verifier = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~";
+    const challenge = createHash("sha256")
+      .update(verifier)
+      .digest("base64url");
+
+    const code = issueAuthorizationCode({
+      origin,
+      clientId: "https://chatgpt.com/oauth/client.json",
+      redirectUri: "https://chatgpt.com/connector_platform_oauth_redirect",
+      resource: oauthResource(origin),
+      scope: ["mcp", "offline_access"],
+      codeChallenge: challenge,
+    });
+
+    const payload = verifySignedToken(code, "code", origin);
+    assert.ok(payload);
+    assert.equal(payload?.aud, origin);
+    assert.equal(payload?.client_id, "https://chatgpt.com/oauth/client.json");
+    assert.equal(verifyPkce(verifier, challenge), true);
+    assert.equal(verifyPkce(verifier + "wrong", challenge), false);
+
+    const access = issueAccessToken({
+      origin,
+      clientId: "https://chatgpt.com/oauth/client.json",
+      resource: origin,
+      scope: ["mcp"],
+    });
+    assert.equal(verifySignedToken(access, "access", origin)?.aud, origin);
+  } finally {
+    if (previous === undefined) delete process.env.MCP_AUTH_TOKEN;
+    else process.env.MCP_AUTH_TOKEN = previous;
+  }
 });
