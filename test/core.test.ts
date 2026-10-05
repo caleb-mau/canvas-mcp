@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { toFormBody } from "../src/canvas.js";
-import { normalizeBaseUrl } from "../src/config.js";
-import { bearerTokenMatches } from "../src/http.js";
+import { toFormBody } from "../src/canvas";
+import { normalizeBaseUrl } from "../src/config";
+import { bearerTokenMatches } from "../src/http";
 
 test("normalizeBaseUrl accepts a district hostname", () => {
   assert.equal(
