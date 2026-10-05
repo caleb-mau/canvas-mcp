@@ -358,9 +358,20 @@ export class CanvasClient {
       if (!current || typeof current !== "object") return current;
 
       const object = current as Record<string, unknown>;
-      const linkedId = ["id", "user_id", "student_id", "author_id"]
+      const explicitLinkedId = ["user_id", "student_id", "author_id", "recipient_id"]
         .map((key) => object[key])
         .find((raw) => raw !== undefined && raw !== null && byId.has(String(raw)));
+      const looksLikeUserObject = [...USER_NAME_KEYS, ...USER_PRIVATE_KEYS]
+        .some((key) => key in object);
+      const objectId = object.id;
+      const linkedId = explicitLinkedId ?? (
+        looksLikeUserObject &&
+        objectId !== undefined &&
+        objectId !== null &&
+        byId.has(String(objectId))
+          ? objectId
+          : undefined
+      );
       const linkedAlias = linkedId === undefined ? undefined : byId.get(String(linkedId));
       const output: Record<string, unknown> = {};
 
