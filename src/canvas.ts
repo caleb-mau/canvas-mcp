@@ -424,7 +424,10 @@ export class CanvasClient {
     }
   }
 
-  async teacherStudents(courseId: string): Promise<Record<string, unknown>[]> {
+  async teacherStudents(
+    courseId: string,
+    includeAcademicContext = false,
+  ): Promise<Record<string, unknown>[]> {
     this.requireTeacherMode();
 
     const raw = await this.request<Record<string, unknown>[]>(
@@ -453,9 +456,13 @@ export class CanvasClient {
         student_ref: studentRef,
         enrollment_state: enrollment.enrollment_state,
         course_section_id: enrollment.course_section_id,
-        grades: enrollment.grades,
-        last_activity_at: enrollment.last_activity_at,
-        total_activity_time: enrollment.total_activity_time,
+        ...(includeAcademicContext
+          ? {
+              grades: enrollment.grades,
+              last_activity_at: enrollment.last_activity_at,
+              total_activity_time: enrollment.total_activity_time,
+            }
+          : {}),
       };
     }).filter((item) => item.student_ref);
   }
@@ -468,7 +475,7 @@ export class CanvasClient {
 
     const identities = await this.courseStudents(courseId);
     const identity = identities.find((candidate) =>
-      candidate.courseAlias === studentRef || candidate.globalAlias === studentRef
+      candidate.courseAlias === studentRef
     );
     if (!identity) {
       throw new CanvasApiError("Could not resolve that student_ref in this course.");
