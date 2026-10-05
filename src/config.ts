@@ -2,7 +2,7 @@ import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-export type WriteMode = "read_only" | "student" | "full";
+export type WriteMode = "read_only" | "student" | "teacher" | "full";
 
 export interface CanvasMcpConfig {
   baseUrl: string;
@@ -56,8 +56,8 @@ function parseNumber(value: string | undefined, fallback: number, min: number, m
 
 function parseWriteMode(value: string | undefined): WriteMode | undefined {
   if (!value) return undefined;
-  if (value === "read_only" || value === "student" || value === "full") return value;
-  throw new Error("CANVAS_WRITE_MODE must be read_only, student, or full.");
+  if (value === "read_only" || value === "student" || value === "teacher" || value === "full") return value;
+  throw new Error("CANVAS_WRITE_MODE must be read_only, student, teacher, or full.");
 }
 
 export async function readStoredConfig(): Promise<StoredConfig> {
