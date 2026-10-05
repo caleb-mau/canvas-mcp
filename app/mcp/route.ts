@@ -1,4 +1,4 @@
-import { handleRemoteMcp } from "../../src/http.js";
+import { handleRemoteMcp } from "../../src/http";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
