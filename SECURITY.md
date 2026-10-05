@@ -35,6 +35,18 @@ Pseudonymous `student_ref` values are not claimed to make a record legally de id
 
 It is not a general purpose data loss prevention system. Free form content can contain personal information that Canvas does not separately identify, such as a phone number or home address typed by a student. Do not assume teacher mode can detect arbitrary unknown personal data.
 
+## Module video downloads
+
+Video retrieval is opt in and is never performed during normal module reads.
+
+Short lived video links are HMAC signed and expire after ten minutes. The requested source URL, output limit, and quality bound are covered by the signature, so callers cannot modify them after the MCP tool creates the link.
+
+Before serving media, canvas-mcp requires HTTPS and rejects localhost and private network addresses. Direct MP4 redirects are revalidated. yt-dlp runs without Canvas credentials, cookies, or user supplied command line arguments.
+
+The automatically bootstrapped Vercel binary is pinned to a specific upstream yt-dlp release and verified with its published SHA 256 digest before execution.
+
+Do not add arbitrary yt-dlp flags from model or user input. Keep the allowed argument surface fixed in server code.
+
 ## Remote file references
 
 Hosted file submission accepts temporary MCP file download URLs. To reduce server side request forgery risk, Canvas MCP:
