@@ -252,14 +252,47 @@ Small local state actions such as marking a module item complete are not current
 
 ## File submissions
 
-Canvas file submissions use the real Canvas upload flow:
+`canvas_submit_file` supports two file sources:
 
-1. Ask Canvas for an upload target
-2. Upload the file to that target
-3. Complete the Canvas upload
-4. Submit the returned Canvas file ID to the assignment
+* **Hosted MCP clients:** pass a real MCP file object in `file`
+* **Local stdio clients:** pass a filesystem path in `file_path`
 
-The Canvas bearer token is never forwarded to an unrelated origin.
+For ChatGPT, the tool declares `_meta["openai/fileParams"] = ["file"]`. ChatGPT can therefore hand the tool an authorized file reference instead of asking the user or model to paste a download URL.
+
+The file reference has this shape:
+
+```json
+{
+  "download_url": "https://temporary-file-url.example/...",
+  "file_id": "file_...",
+  "mime_type": "application/pdf",
+  "file_name": "essay.pdf"
+}
+```
+
+This is source agnostic. The file can come from Google Drive, another compatible connector, a user upload, a generated file, or any other client that can provide the same file reference. Canvas MCP does not contain Google Drive specific code.
+
+For a hosted file reference, the flow is:
+
+1. The MCP client supplies the temporary file reference
+2. The user confirms the Canvas submission
+3. Canvas MCP securely downloads the file bytes
+4. Canvas MCP asks Canvas for an upload target
+5. Canvas MCP uploads the bytes to that target
+6. Canvas completes the upload and returns a Canvas file ID
+7. Canvas MCP submits that Canvas file ID to the assignment
+
+For a local `file_path`, the same Canvas upload flow starts from the local file bytes instead.
+
+Remote file downloads must use HTTPS. Canvas MCP rejects localhost and private network targets, validates redirect targets, does not forward Canvas credentials to the file source, and enforces a configurable download size limit.
+
+The default remote file limit is 50 MB and can be changed with:
+
+```
+CANVAS_MAX_REMOTE_FILE_MB=50
+```
+
+Confirmation happens before the remote file is downloaded, so cancelling the submission does not fetch or upload the file.
 
 ## Environment variables
 
@@ -272,6 +305,7 @@ The Canvas bearer token is never forwarded to an unrelated origin.
 | `CANVAS_REQUIRE_CONFIRMATION` | `true` | Requires end user confirmation for protected writes |
 | `CANVAS_MAX_PAGES` | `20` | Maximum Canvas pagination pages followed per call |
 | `CANVAS_TIMEOUT_MS` | `30000` | Canvas request timeout |
+| `CANVAS_MAX_REMOTE_FILE_MB` | `50` | Maximum downloaded MCP file size before Canvas upload |
 | `CANVAS_REDACTION_KEY` | automatic fallback | Stable teacher mode aliases |
 
 ## How the built in OAuth works
