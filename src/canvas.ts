@@ -1,6 +1,6 @@
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, resolve } from "node:path";
-import type { CanvasMcpConfig, WriteMode } from "./config.js";
+import type { CanvasMcpConfig, WriteMode } from "./config";
 
 export type Primitive = string | number | boolean | null;
 export type QueryValue = Primitive | Primitive[] | undefined;
