@@ -169,7 +169,7 @@ async function assertPublicHttpsUrl(input: string): Promise<URL> {
     return url;
   }
 
-  let addresses: Awaited<ReturnType<typeof lookup>>;
+  let addresses: Array<{ address: string; family: number }>;
   try {
     addresses = await lookup(hostname, { all: true, verbatim: true });
   } catch {
@@ -836,9 +836,11 @@ export class CanvasClient {
     for (const [key, value] of Object.entries(init.data.upload_params)) {
       form.append(key, value);
     }
+    const blobBytes = new Uint8Array(file.bytes.byteLength);
+    blobBytes.set(file.bytes);
     form.append(
       "file",
-      new Blob([file.bytes], { type: file.contentType }),
+      new Blob([blobBytes], { type: file.contentType }),
       file.name,
     );
 
