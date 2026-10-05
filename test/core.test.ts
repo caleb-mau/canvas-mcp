@@ -206,3 +206,116 @@ test("OAuth client validation is pinned to ChatGPT CIMD and callback", () => {
     false,
   );
 });
+
+
+test("remote Canvas submission files reject private network URLs", async () => {
+  const client = new CanvasClient({
+    baseUrl: "https://canvas.example.invalid",
+    accessToken: "test-token",
+    writeMode: "student",
+    maxPages: 20,
+    timeoutMs: 30000,
+    redactionKey: "test-redaction-key",
+  });
+
+  await assert.rejects(
+    () => client.uploadSubmissionFileReference("123", "456", {
+      download_url: "https://127.0.0.1/private.pdf",
+      file_id: "file_private",
+      mime_type: "application/pdf",
+      file_name: "private.pdf",
+    }),
+    /private or local network address/,
+  );
+});
+
+test("remote file references download without Canvas credentials and upload to Canvas", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: string[] = [];
+
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(
+      typeof input === "string"
+        ? input
+        : input instanceof Request
+          ? input.url
+          : input.toString(),
+    );
+    calls.push(url.toString());
+
+    if (url.hostname === "93.184.216.34") {
+      const headers = new Headers(init?.headers);
+      assert.equal(headers.has("authorization"), false);
+      return new Response("example pdf bytes", {
+        status: 200,
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Length": "17",
+        },
+      });
+    }
+
+    if (
+      url.hostname === "canvas.example.invalid" &&
+      url.pathname.endsWith("/submissions/self/files")
+    ) {
+      return Response.json({
+        upload_url: "https://uploads.example.invalid/upload",
+        upload_params: {
+          key: "canvas-upload-key",
+        },
+      });
+    }
+
+    if (url.hostname === "uploads.example.invalid") {
+      return new Response(null, {
+        status: 302,
+        headers: {
+          Location: "https://canvas.example.invalid/api/v1/files/777",
+        },
+      });
+    }
+
+    if (
+      url.hostname === "canvas.example.invalid" &&
+      url.pathname === "/api/v1/files/777"
+    ) {
+      return Response.json({
+        id: 777,
+        display_name: "essay.pdf",
+        content_type: "application/pdf",
+      });
+    }
+
+    throw new Error("Unexpected request in remote file test: " + url);
+  };
+
+  try {
+    const client = new CanvasClient({
+      baseUrl: "https://canvas.example.invalid",
+      accessToken: "test-token",
+      writeMode: "student",
+      maxPages: 20,
+      timeoutMs: 30000,
+      redactionKey: "test-redaction-key",
+    });
+
+    const uploaded = await client.uploadSubmissionFileReference(
+      "123",
+      "456",
+      {
+        download_url: "https://93.184.216.34/essay.pdf",
+        file_id: "file_test_123",
+        mime_type: "application/pdf",
+        file_name: "essay.pdf",
+      },
+    );
+
+    assert.equal(uploaded.id, 777);
+    assert.equal(calls[0], "https://93.184.216.34/essay.pdf");
+    assert.ok(calls.some((url) => url.includes("/submissions/self/files")));
+    assert.ok(calls.some((url) => url === "https://uploads.example.invalid/upload"));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
