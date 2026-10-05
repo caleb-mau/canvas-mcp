@@ -1,35 +1,42 @@
 {
   "name": "canvas-mcp",
   "version": "0.1.0",
-  "description": "Local first MCP server for Canvas LMS",
+  "description": "Self hosted Canvas LMS MCP server for local stdio or remote HTTP",
   "type": "module",
   "license": "MIT",
   "engines": {
     "node": ">=20"
   },
   "bin": {
-    "canvas-mcp": "dist/src/index.js"
+    "canvas-mcp": "dist-cli/src/index.js"
   },
   "files": [
-    "dist",
+    "dist-cli",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "dev": "tsx src/index.ts",
-    "start": "node dist/src/index.js",
+    "dev": "next dev",
+    "dev:stdio": "tsx src/index.ts",
+    "build": "next build && tsc -p tsconfig.cli.json",
+    "start": "next start",
+    "start:stdio": "node dist-cli/src/index.js",
     "setup": "tsx src/index.ts setup",
     "setup:web": "tsx src/index.ts setup --web",
     "test": "tsx --test test/*.test.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.cli.json --noEmit"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.3.0",
+    "next": "16.3.8",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/node": "^24.7.0",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3"
   },
@@ -38,6 +45,8 @@
     "canvas-lms",
     "mcp",
     "model-context-protocol",
-    "instructure"
+    "instructure",
+    "vercel",
+    "self-hosted"
   ]
 }
