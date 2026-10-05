@@ -1,5 +1,7 @@
 import { createHmac } from "node:crypto";
+import { lookup } from "node:dns/promises";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { isIP } from "node:net";
 import { basename, dirname, extname, resolve } from "node:path";
 import type { CanvasMcpConfig, WriteMode } from "./config";
 
@@ -14,6 +16,13 @@ export interface ApiResult<T = unknown> {
   status: number;
   headers: Record<string, string>;
   pages?: number;
+}
+
+export interface RemoteFileReference {
+  download_url: string;
+  file_id: string;
+  mime_type?: string;
+  file_name?: string;
 }
 
 export class CanvasApiError extends Error {
@@ -87,6 +96,129 @@ function headersObject(headers: Headers): Record<string, string> {
     out[key] = value;
   });
   return out;
+}
+
+function remoteFileLimitBytes(): number {
+  const configured = Number(process.env.CANVAS_MAX_REMOTE_FILE_MB || "50");
+  const megabytes = Number.isFinite(configured) && configured > 0 ? configured : 50;
+  return Math.floor(megabytes * 1024 * 1024);
+}
+
+function isPrivateIpv4(address: string): boolean {
+  const parts = address.split(".").map(Number);
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+    return true;
+  }
+
+  const [a, b] = parts;
+  return (
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    (a === 100 && b >= 64 && b <= 127) ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 198 && (b === 18 || b === 19)) ||
+    a >= 224
+  );
+}
+
+function isPrivateIpv6(address: string): boolean {
+  const normalized = address.toLowerCase();
+  if (normalized === "::" || normalized === "::1") return true;
+  if (normalized.startsWith("fc") || normalized.startsWith("fd")) return true;
+  if (/^fe[89ab]/.test(normalized)) return true;
+  if (normalized.startsWith("ff")) return true;
+
+  const mapped = normalized.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  return mapped ? isPrivateIpv4(mapped[1]) : false;
+}
+
+function isPrivateAddress(address: string): boolean {
+  const family = isIP(address);
+  if (family === 4) return isPrivateIpv4(address);
+  if (family === 6) return isPrivateIpv6(address);
+  return true;
+}
+
+async function assertPublicHttpsUrl(input: string): Promise<URL> {
+  let url: URL;
+  try {
+    url = new URL(input);
+  } catch {
+    throw new CanvasApiError("File download URL is invalid.");
+  }
+
+  if (url.protocol !== "https:") {
+    throw new CanvasApiError("Remote file download URLs must use HTTPS.");
+  }
+  if (url.username || url.password) {
+    throw new CanvasApiError("Remote file download URLs must not contain embedded credentials.");
+  }
+
+  const hostname = url.hostname.replace(/^\[|\]$/g, "");
+  if (hostname === "localhost" || hostname.endsWith(".localhost")) {
+    throw new CanvasApiError("Refusing to download a remote file from localhost.");
+  }
+
+  if (isIP(hostname)) {
+    if (isPrivateAddress(hostname)) {
+      throw new CanvasApiError("Refusing to download a remote file from a private or local network address.");
+    }
+    return url;
+  }
+
+  let addresses: Array<{ address: string; family: number }>;
+  try {
+    addresses = await lookup(hostname, { all: true, verbatim: true });
+  } catch {
+    throw new CanvasApiError("Could not resolve the remote file host.");
+  }
+
+  if (!Array.isArray(addresses) || !addresses.length || addresses.some((entry) => isPrivateAddress(entry.address))) {
+    throw new CanvasApiError("Refusing to download a remote file whose host resolves to a private or local network address.");
+  }
+
+  return url;
+}
+
+async function readResponseWithLimit(response: Response, maxBytes: number): Promise<Uint8Array> {
+  const declared = Number(response.headers.get("content-length") || "0");
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    throw new CanvasApiError(`Remote file exceeds the configured ${Math.floor(maxBytes / 1024 / 1024)} MB limit.`);
+  }
+
+  if (!response.body) return new Uint8Array();
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        throw new CanvasApiError(`Remote file exceeds the configured ${Math.floor(maxBytes / 1024 / 1024)} MB limit.`);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
 }
 
 function mimeTypeFor(path: string): string {
@@ -667,31 +799,50 @@ export class CanvasClient {
     };
   }
 
-  async uploadSubmissionFile(courseId: string, assignmentId: string, filePath: string): Promise<Record<string, unknown>> {
-    if (this.writeMode === "read_only") throw new CanvasApiError("This Canvas MCP is configured as read_only.");
-
-    const fileStat = await stat(filePath);
-    if (!fileStat.isFile()) throw new CanvasApiError(`Not a file: ${filePath}`);
-    const name = basename(filePath);
-    const contentType = mimeTypeFor(filePath);
+  private async uploadSubmissionBytes(
+    courseId: string,
+    assignmentId: string,
+    file: {
+      name: string;
+      contentType: string;
+      bytes: Uint8Array;
+    },
+  ): Promise<Record<string, unknown>> {
+    if (this.writeMode === "read_only") {
+      throw new CanvasApiError("This Canvas MCP is configured as read_only.");
+    }
 
     const init = await this.post<{
       upload_url: string;
       upload_params: Record<string, string>;
-    }>(`/api/v1/courses/${encodeURIComponent(courseId)}/assignments/${encodeURIComponent(assignmentId)}/submissions/self/files`, {
-      name,
-      size: fileStat.size,
-      content_type: contentType,
-    });
+    }>(
+      `/api/v1/courses/${encodeURIComponent(courseId)}/assignments/${encodeURIComponent(assignmentId)}/submissions/self/files`,
+      {
+        name: file.name,
+        size: file.bytes.byteLength,
+        content_type: file.contentType,
+      },
+    );
 
     if (!init.data?.upload_url || !init.data.upload_params) {
-      throw new CanvasApiError("Canvas did not return upload_url and upload_params.", init.status, init.data);
+      throw new CanvasApiError(
+        "Canvas did not return upload_url and upload_params.",
+        init.status,
+        init.data,
+      );
     }
 
-    const bytes = await readFile(filePath);
     const form = new FormData();
-    for (const [key, value] of Object.entries(init.data.upload_params)) form.append(key, value);
-    form.append("file", new Blob([bytes], { type: contentType }), name);
+    for (const [key, value] of Object.entries(init.data.upload_params)) {
+      form.append(key, value);
+    }
+    const blobBytes = new Uint8Array(file.bytes.byteLength);
+    blobBytes.set(file.bytes);
+    form.append(
+      "file",
+      new Blob([blobBytes], { type: file.contentType }),
+      file.name,
+    );
 
     const uploadResponse = await fetch(init.data.upload_url, {
       method: "POST",
@@ -702,14 +853,22 @@ export class CanvasClient {
 
     if (![201, 301, 302, 303, 307, 308].includes(uploadResponse.status)) {
       const details = await this.parseResponse(uploadResponse);
-      throw new CanvasApiError(`Canvas file upload failed with HTTP ${uploadResponse.status}.`, uploadResponse.status, details);
+      throw new CanvasApiError(
+        `Canvas file upload failed with HTTP ${uploadResponse.status}.`,
+        uploadResponse.status,
+        details,
+      );
     }
 
     const location = uploadResponse.headers.get("location");
     if (!location) {
       const direct = await this.parseResponse(uploadResponse);
-      if (direct && typeof direct === "object") return direct as Record<string, unknown>;
-      throw new CanvasApiError("Canvas upload succeeded but did not provide a completion Location header.");
+      if (direct && typeof direct === "object") {
+        return direct as Record<string, unknown>;
+      }
+      throw new CanvasApiError(
+        "Canvas upload succeeded but did not provide a completion Location header.",
+      );
     }
 
     const completion = this.canvasUrl(location);
@@ -722,6 +881,7 @@ export class CanvasClient {
       },
       signal: AbortSignal.timeout(this.timeoutMs),
     });
+
     const completed = await this.parseResponse(completeResponse);
     if (!completeResponse.ok) {
       throw new CanvasApiError(
@@ -732,4 +892,94 @@ export class CanvasClient {
     }
     return completed as Record<string, unknown>;
   }
+
+  async uploadSubmissionFile(
+    courseId: string,
+    assignmentId: string,
+    filePath: string,
+  ): Promise<Record<string, unknown>> {
+    const fileStat = await stat(filePath);
+    if (!fileStat.isFile()) {
+      throw new CanvasApiError(`Not a file: ${filePath}`);
+    }
+
+    const name = basename(filePath);
+    return this.uploadSubmissionBytes(courseId, assignmentId, {
+      name,
+      contentType: mimeTypeFor(filePath),
+      bytes: await readFile(filePath),
+    });
+  }
+
+  async uploadSubmissionFileReference(
+    courseId: string,
+    assignmentId: string,
+    file: RemoteFileReference,
+  ): Promise<Record<string, unknown>> {
+    if (!file.download_url || !file.file_id) {
+      throw new CanvasApiError(
+        "Remote file references require download_url and file_id.",
+      );
+    }
+
+    let current = await assertPublicHttpsUrl(file.download_url);
+    let response: Response | undefined;
+
+    for (let redirects = 0; redirects <= 5; redirects += 1) {
+      response = await fetch(current, {
+        method: "GET",
+        headers: {
+          Accept: "application/octet-stream,*/*",
+          "User-Agent": "canvas-mcp/0.1.0",
+        },
+        redirect: "manual",
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+
+      if (![301, 302, 303, 307, 308].includes(response.status)) break;
+
+      const location = response.headers.get("location");
+      if (!location) {
+        throw new CanvasApiError(
+          "Remote file download redirected without a Location header.",
+        );
+      }
+      if (redirects === 5) {
+        throw new CanvasApiError("Remote file download exceeded the redirect limit.");
+      }
+      current = await assertPublicHttpsUrl(new URL(location, current).toString());
+    }
+
+    if (!response || !response.ok) {
+      throw new CanvasApiError(
+        `Remote file download failed${response ? ` with HTTP ${response.status}` : ""}.`,
+        response?.status,
+      );
+    }
+
+    const bytes = await readResponseWithLimit(
+      response,
+      remoteFileLimitBytes(),
+    );
+    if (!bytes.byteLength) {
+      throw new CanvasApiError("Remote file download returned an empty file.");
+    }
+
+    const rawName =
+      file.file_name?.trim() ||
+      basename(decodeURIComponent(current.pathname)) ||
+      "submission-file";
+    const name = basename(rawName).replace(/[\r\n]/g, "").slice(0, 255) || "submission-file";
+    const contentType =
+      file.mime_type?.trim() ||
+      response.headers.get("content-type")?.split(";")[0]?.trim() ||
+      mimeTypeFor(name);
+
+    return this.uploadSubmissionBytes(courseId, assignmentId, {
+      name,
+      contentType,
+      bytes,
+    });
+  }
+
 }

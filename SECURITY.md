@@ -35,6 +35,21 @@ Pseudonymous `student_ref` values are not claimed to make a record legally de id
 
 It is not a general purpose data loss prevention system. Free form content can contain personal information that Canvas does not separately identify, such as a phone number or home address typed by a student. Do not assume teacher mode can detect arbitrary unknown personal data.
 
+## Remote file references
+
+Hosted file submission accepts temporary MCP file download URLs. To reduce server side request forgery risk, Canvas MCP:
+
+* Requires HTTPS
+* Rejects localhost
+* Rejects private and local network IP ranges
+* Resolves hostnames and rejects private resolution results
+* Revalidates redirect targets
+* Limits redirects
+* Enforces a configurable maximum download size
+* Never sends the Canvas bearer token to the file source
+
+Do not weaken these checks merely to support a storage provider. File integrations should produce ordinary HTTPS file references instead.
+
 ## Education record handling
 
 The application does not intentionally log Canvas response bodies, student submissions, grades, messages, or roster payloads. Hosted MCP responses are marked `Cache-Control: no-store`.
