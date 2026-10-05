@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
-import { createServer } from "./server.js";
-import { runTerminalSetup, runWebSetup } from "./setup.js";
+import { createServer } from "./server";
+import { runTerminalSetup, runWebSetup } from "./setup";
 
 async function main(): Promise<void> {
   const [command, ...args] = process.argv.slice(2);
