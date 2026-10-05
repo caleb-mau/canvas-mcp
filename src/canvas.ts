@@ -411,11 +411,20 @@ export class CanvasClient {
     if (path === "/api/v1/users/self/profile") return value;
 
     const courseId = courseIdFromPath(path);
-    const identities = courseId
-      ? await this.courseStudents(courseId)
-      : await this.allTeacherStudents();
+    if (courseId) {
+      return this.redactWithIdentities(
+        value,
+        await this.courseStudents(courseId),
+        true,
+      );
+    }
 
-    return this.redactWithIdentities(value, identities, Boolean(courseId));
+    const identities = (await this.allTeacherStudents()).map((identity) => ({
+      ...identity,
+      courseAlias: this.aliasFor("context:" + path, identity.userId, "course"),
+    }));
+
+    return this.redactWithIdentities(value, identities, true);
   }
 
   requireTeacherMode(): void {
