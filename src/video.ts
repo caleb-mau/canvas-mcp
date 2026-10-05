@@ -310,7 +310,7 @@ export function extractVideoUrls(value: unknown): string[] {
 export function isDirectVideoUrl(input: string): boolean {
   try {
     const url = new URL(input);
-    return /\.(mp4|webm|mov|m4v)(?:$|[?#])/i.test(
+    return /\.mp4(?:$|[?#])/i.test(
       url.pathname + url.search + url.hash,
     );
   } catch {
