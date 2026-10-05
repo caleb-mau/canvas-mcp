@@ -18,6 +18,11 @@ import {
   verifyPkce,
   verifySignedToken,
 } from "../src/oauth";
+import {
+  extractVideoUrls,
+  signVideoDownload,
+  verifyVideoDownloadToken,
+} from "../src/video";
 
 test("normalizeBaseUrl accepts a district hostname", () => {
   assert.equal(
@@ -330,6 +335,12 @@ test("Canvas tool annotations classify reads and consequential writes", () => {
     openWorldHint: false,
   });
 
+  assert.deepEqual(canvasToolAnnotations("canvas_download_module_video"), {
+    readOnlyHint: true,
+    destructiveHint: false,
+    openWorldHint: true,
+  });
+
   assert.deepEqual(canvasToolAnnotations("canvas_mark_module_item"), {
     readOnlyHint: false,
     destructiveHint: false,
@@ -441,5 +452,49 @@ test("module item resolver does not browse external module targets", async () =>
     assert.equal(fetchCalled, false);
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+
+test("module video extraction finds YouTube embeds and direct video URLs", () => {
+  const urls = extractVideoUrls({
+    body: [
+      '<iframe src="https://www.youtube.com/embed/abc123"></iframe>',
+      '<a href="https://youtu.be/xyz789">watch</a>',
+      '<video src="https://cdn.example.com/lesson.mp4"></video>',
+      '<a href="https://example.com/not-video">not video</a>',
+    ].join(""),
+  });
+
+  assert.deepEqual(urls, [
+    "https://www.youtube.com/embed/abc123",
+    "https://youtu.be/xyz789",
+    "https://cdn.example.com/lesson.mp4",
+  ]);
+});
+
+test("video download links use short lived signed stateless tokens", () => {
+  const previous = process.env.MCP_AUTH_TOKEN;
+  process.env.MCP_AUTH_TOKEN = "video-token-test-secret";
+
+  try {
+    const token = signVideoDownload({
+      sourceUrl: "https://youtu.be/example",
+      fileName: "Week 4 Lesson",
+      maxHeight: 720,
+    });
+
+    const payload = verifyVideoDownloadToken(token);
+    assert.ok(payload);
+    assert.equal(payload?.source_url, "https://youtu.be/example");
+    assert.equal(payload?.file_name, "Week 4 Lesson.mp4");
+    assert.equal(payload?.max_height, 720);
+    assert.ok((payload?.exp || 0) > Math.floor(Date.now() / 1000));
+
+    const tampered = token.slice(0, -1) + (token.endsWith("a") ? "b" : "a");
+    assert.equal(verifyVideoDownloadToken(tampered), null);
+  } finally {
+    if (previous === undefined) delete process.env.MCP_AUTH_TOKEN;
+    else process.env.MCP_AUTH_TOKEN = previous;
   }
 });
