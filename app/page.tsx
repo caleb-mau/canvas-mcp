@@ -13,6 +13,7 @@ const tools = [
   "Inbox",
   "Quizzes",
   "Raw Canvas API",
+  "Explicit write confirmation",
 ];
 
 export default function Home() {
@@ -59,8 +60,9 @@ export default function Home() {
         </div>
 
         <p className="foot">
-          Canvas permissions still apply. The MCP cannot do anything your Canvas
-          account and access token are not allowed to do.
+          Reading and drafting do not submit work. Assignment submissions,
+          grading, messages, discussion posts, and raw mutating API calls ask
+          for end user confirmation by default. Canvas permissions still apply.
         </p>
       </section>
     </main>
