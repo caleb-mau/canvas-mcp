@@ -33,7 +33,12 @@ const READ_ONLY_TOOLS = new Set([
   "canvas_get_submission",
   "canvas_list_my_submissions",
   "canvas_list_modules",
+  "canvas_get_module",
   "canvas_list_module_items",
+  "canvas_get_module_item",
+  "canvas_get_module_item_content",
+  "canvas_read_module",
+  "canvas_get_module_item_sequence",
   "canvas_list_pages",
   "canvas_get_page",
   "canvas_list_discussions",
@@ -98,6 +103,113 @@ export function canvasToolAnnotations(name: string): CanvasToolAnnotations {
 
 function apiPath(...parts: Array<string | number>): string {
   return "/api/v1/" + parts.map((part) => encodeURIComponent(String(part))).join("/");
+}
+
+type ModuleItemRecord = Record<string, unknown>;
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.length ? value : undefined;
+}
+
+function idValue(value: unknown): string | undefined {
+  return typeof value === "string" || typeof value === "number"
+    ? String(value)
+    : undefined;
+}
+
+export async function resolveModuleItemContent(
+  client: CanvasClient,
+  courseId: string,
+  item: ModuleItemRecord,
+  options: { discussionFullView?: boolean } = {},
+): Promise<Record<string, unknown>> {
+  const type = stringValue(item.type) || "Unknown";
+  const contentId = idValue(item.content_id);
+  const pageUrl = stringValue(item.page_url);
+  const apiUrl = stringValue(item.url);
+  const externalUrl = stringValue(item.external_url);
+
+  if (type === "SubHeader") {
+    return {
+      resolved: false,
+      kind: "SubHeader",
+      reason: "Module subheaders are organizational labels and have no linked Canvas content.",
+    };
+  }
+
+  if (type === "ExternalUrl" || type === "ExternalTool") {
+    return {
+      resolved: false,
+      kind: type,
+      external_url: externalUrl,
+      new_tab: item.new_tab,
+      reason: "External module targets are returned but are not fetched automatically.",
+    };
+  }
+
+  try {
+    if (type === "Discussion" && options.discussionFullView && contentId) {
+      const data = await client.get(
+        apiPath("courses", courseId, "discussion_topics", contentId) + "/view",
+      );
+      return { resolved: true, kind: type, content: data.data };
+    }
+
+    if (apiUrl) {
+      const query: Query | undefined =
+        type === "Assignment" ? { include: ["submission"] } : undefined;
+      const data = await client.get(apiUrl, query);
+      return { resolved: true, kind: type, content: data.data };
+    }
+
+    if (type === "Page" && pageUrl) {
+      const data = await client.get(apiPath("courses", courseId, "pages", pageUrl));
+      return { resolved: true, kind: type, content: data.data };
+    }
+
+    if (type === "File" && contentId) {
+      const data = await client.get(apiPath("files", contentId));
+      return { resolved: true, kind: type, content: data.data };
+    }
+
+    if (type === "Assignment" && contentId) {
+      const data = await client.get(
+        apiPath("courses", courseId, "assignments", contentId),
+        { include: ["submission"] },
+      );
+      return { resolved: true, kind: type, content: data.data };
+    }
+
+    if (type === "Quiz" && contentId) {
+      const data = await client.get(apiPath("courses", courseId, "quizzes", contentId));
+      return { resolved: true, kind: type, content: data.data };
+    }
+
+    if (type === "Discussion" && contentId) {
+      const data = await client.get(
+        apiPath("courses", courseId, "discussion_topics", contentId),
+      );
+      return { resolved: true, kind: type, content: data.data };
+    }
+
+    return {
+      resolved: false,
+      kind: type,
+      reason: "This module item did not expose a resolvable Canvas API target.",
+      item,
+    };
+  } catch (error) {
+    if (error instanceof CanvasApiError) {
+      return {
+        resolved: false,
+        kind: type,
+        error: error.message,
+        status: error.status,
+        details: error.details,
+      };
+    }
+    throw error;
+  }
 }
 
 function ok(data: unknown, extra?: Record<string, unknown>) {
@@ -442,7 +554,7 @@ export function createServer(): McpServer {
   tool(
     server,
     "canvas_list_modules",
-    "List modules in a course.",
+    "List modules in a course in Canvas order. Includes module items and content details by default so module based courses can be discovered even when teachers do not publish traditional assignments.",
     z.object({
       course_id: id,
       include: z.array(z.string()).default(["items", "content_details"]),
@@ -458,8 +570,24 @@ export function createServer(): McpServer {
 
   tool(
     server,
+    "canvas_get_module",
+    "Get one Canvas module including its completion state, prerequisites, lock state, and inline items when Canvas returns them.",
+    z.object({
+      course_id: id,
+      module_id: id,
+      include: z.array(z.string()).default(["items", "content_details"]),
+    }),
+    async ({ course_id, module_id, include }, client) =>
+      (await client.get(
+        apiPath("courses", course_id, "modules", module_id),
+        { include },
+      )).data,
+  );
+
+  tool(
+    server,
     "canvas_list_module_items",
-    "List items inside a Canvas module.",
+    "List every item inside a Canvas module in order. Items can be files, pages, discussions, assignments, quizzes, subheaders, external URLs, or external tools.",
     z.object({
       course_id: id,
       module_id: id,
@@ -476,8 +604,132 @@ export function createServer(): McpServer {
 
   tool(
     server,
+    "canvas_get_module_item",
+    "Get one module item with content details, completion requirements, publication state, lock information, and its linked Canvas API target when available.",
+    z.object({
+      course_id: id,
+      module_id: id,
+      item_id: id,
+      include: z.array(z.string()).default(["content_details"]),
+    }),
+    async ({ course_id, module_id, item_id, include }, client) =>
+      (await client.get(
+        apiPath("courses", course_id, "modules", module_id, "items", item_id),
+        { include },
+      )).data,
+  );
+
+  tool(
+    server,
+    "canvas_get_module_item_content",
+    "Resolve a module item to its underlying Canvas content. Pages return their body, assignments include the current submission, files return file metadata, quizzes and discussions return their Canvas objects, and external targets are returned without browsing them.",
+    z.object({
+      course_id: id,
+      module_id: id,
+      item_id: id,
+      discussion_full_view: z.boolean().default(false),
+    }),
+    async ({ course_id, module_id, item_id, discussion_full_view }, client) => {
+      const item = await client.get<ModuleItemRecord>(
+        apiPath("courses", course_id, "modules", module_id, "items", item_id),
+        { include: ["content_details"] },
+      );
+      const linked = await resolveModuleItemContent(client, course_id, item.data, {
+        discussionFullView: discussion_full_view,
+      });
+      return { item: item.data, linked };
+    },
+  );
+
+  tool(
+    server,
+    "canvas_read_module",
+    "Read a complete Canvas module as learning content. This always fetches the full item list even when Canvas omits inline items, and can resolve each item to its underlying page, assignment, file, quiz, or discussion. Useful for prompts such as 'what do I need to do in Unit 4?' when teachers organize work primarily through Modules.",
+    z.object({
+      course_id: id,
+      module_id: id,
+      resolve_content: z.boolean().default(true),
+      discussion_full_view: z.boolean().default(false),
+      max_items: z.number().int().min(1).max(100).default(50),
+    }),
+    async ({
+      course_id,
+      module_id,
+      resolve_content,
+      discussion_full_view,
+      max_items,
+    }, client) => {
+      const moduleResult = await client.get<Record<string, unknown>>(
+        apiPath("courses", course_id, "modules", module_id),
+        { include: ["items", "content_details"] },
+      );
+      const moduleData = moduleResult.data;
+      let items = Array.isArray(moduleData.items)
+        ? moduleData.items as ModuleItemRecord[]
+        : [];
+
+      if (!items.length && Number(moduleData.items_count || 0) > 0) {
+        items = (await client.get<ModuleItemRecord[]>(
+          apiPath("courses", course_id, "modules", module_id, "items"),
+          { include: ["content_details"], per_page: 100 },
+          true,
+        )).data;
+      }
+
+      const selected = items.slice(0, max_items);
+      const resolvedItems: Array<Record<string, unknown>> = [];
+
+      for (const item of selected) {
+        const entry: Record<string, unknown> = { item };
+        if (resolve_content) {
+          entry.linked = await resolveModuleItemContent(client, course_id, item, {
+            discussionFullView: discussion_full_view,
+          });
+        }
+        resolvedItems.push(entry);
+      }
+
+      const moduleWithoutItems = { ...moduleData };
+      delete moduleWithoutItems.items;
+
+      return {
+        module: moduleWithoutItems,
+        items: resolvedItems,
+        item_count: items.length,
+        returned_items: selected.length,
+        truncated: items.length > selected.length,
+      };
+    },
+  );
+
+  tool(
+    server,
+    "canvas_get_module_item_sequence",
+    "Find where an asset appears in Canvas Modules and return the previous and next module items. Useful for following a teacher's intended lesson sequence.",
+    z.object({
+      course_id: id,
+      asset_type: z.enum([
+        "ModuleItem",
+        "File",
+        "Page",
+        "Discussion",
+        "Assignment",
+        "Quiz",
+        "ExternalTool",
+      ]),
+      asset_id: id,
+    }),
+    async ({ course_id, asset_type, asset_id }, client) =>
+      (await client.get(
+        apiPath("courses", course_id, "module_item_sequence"),
+        { asset_type, asset_id },
+      )).data,
+  );
+
+  tool(
+    server,
     "canvas_mark_module_item",
-    "Mark a module item read, done, or not done.",
+    "Mark a module item read, done, or not done. This changes Canvas module progress and is separate from merely reading module content.",
     z.object({
       course_id: id,
       module_id: id,
