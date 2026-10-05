@@ -2,6 +2,11 @@ import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 import { CanvasApiError, CanvasClient, type HttpMethod, type Query } from "./canvas";
 import { loadConfig, redactedConfig } from "./config";
+import {
+  assertPublicVideoSource,
+  createVideoResourceUrl,
+  extractVideoUrls,
+} from "./video";
 
 const id = z.union([z.string(), z.number()]).transform(String);
 const scalar = z.union([z.string(), z.number(), z.boolean(), z.null()]);
@@ -73,6 +78,14 @@ const DESTRUCTIVE_WRITE_TOOLS = new Set([
 ]);
 
 export function canvasToolAnnotations(name: string): CanvasToolAnnotations {
+  if (name === "canvas_download_module_video") {
+    return {
+      readOnlyHint: true,
+      destructiveHint: false,
+      openWorldHint: true,
+    };
+  }
+
   if (READ_ONLY_TOOLS.has(name)) {
     return {
       readOnlyHint: true,
@@ -637,7 +650,11 @@ export function createServer(): McpServer {
       const linked = await resolveModuleItemContent(client, course_id, item.data, {
         discussionFullView: discussion_full_view,
       });
-      return { item: item.data, linked };
+      return {
+        item: item.data,
+        linked,
+        video_urls: extractVideoUrls({ item: item.data, linked }),
+      };
     },
   );
 
@@ -686,6 +703,7 @@ export function createServer(): McpServer {
             discussionFullView: discussion_full_view,
           });
         }
+        entry.video_urls = extractVideoUrls(entry);
         resolvedItems.push(entry);
       }
 
@@ -699,6 +717,125 @@ export function createServer(): McpServer {
         returned_items: selected.length,
         truncated: items.length > selected.length,
       };
+    },
+  );
+
+  server.registerTool(
+    "canvas_download_module_video",
+    {
+      description:
+        "Return a downloadable video file for a video that was actually referenced by one Canvas module item. Only call this when the user explicitly asks to download, save, or get the video file itself. Normal module reads only report video URLs and never download video bytes. The server re-resolves the module item, verifies the selected URL belongs to that item, and returns a short lived signed file link. Public YouTube and similar URLs are retrieved with yt-dlp when needed. No cookies, Canvas credentials, or login sessions are passed to yt-dlp, and DRM is not bypassed.",
+      inputSchema: z.object({
+        course_id: id,
+        module_id: id,
+        item_id: id,
+        video_index: z.number().int().min(0).default(0),
+        video_url: z.string().url().optional(),
+        max_height: z.enum(["360", "480", "720", "1080"]).default("720"),
+      }),
+      annotations: canvasToolAnnotations("canvas_download_module_video"),
+      _meta: {
+        securitySchemes: [{ type: "oauth2", scopes: ["mcp"] }],
+      },
+    },
+    async ({
+      course_id,
+      module_id,
+      item_id,
+      video_index,
+      video_url,
+      max_height,
+    }) => {
+      try {
+        const client = new CanvasClient(await loadConfig());
+        const itemResult = await client.get<ModuleItemRecord>(
+          apiPath("courses", course_id, "modules", module_id, "items", item_id),
+          { include: ["content_details"] },
+        );
+        const linked = await resolveModuleItemContent(
+          client,
+          course_id,
+          itemResult.data,
+        );
+        const videoUrls = extractVideoUrls({
+          item: itemResult.data,
+          linked,
+        });
+
+        if (!videoUrls.length) {
+          throw new CanvasApiError(
+            "No supported public video URL was found in this module item.",
+          );
+        }
+
+        let selected: string;
+        if (video_url) {
+          const normalized = new URL(video_url).toString();
+          if (!videoUrls.includes(normalized)) {
+            throw new CanvasApiError(
+              "The requested video URL was not found in this module item.",
+            );
+          }
+          selected = normalized;
+        } else {
+          if (video_index >= videoUrls.length) {
+            throw new CanvasApiError(
+              `video_index ${video_index} is out of range. This item has ${videoUrls.length} detected video URL(s).`,
+            );
+          }
+          selected = videoUrls[video_index];
+        }
+
+        await assertPublicVideoSource(selected);
+
+        const itemTitle =
+          stringValue(itemResult.data.title) || "module-video";
+        const downloadUrl = createVideoResourceUrl({
+          sourceUrl: selected,
+          fileName: itemTitle,
+          maxHeight: Number(max_height),
+        });
+        const fileName = itemTitle
+          .replace(/\.mp4$/i, "")
+          .replace(/[\\/:*?"<>|]/g, " ")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 120) + ".mp4";
+
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(
+                {
+                  course_id,
+                  module_id,
+                  item_id,
+                  selected_video_url: selected,
+                  detected_video_urls: videoUrls,
+                  file_name: fileName,
+                  expires_in_seconds: 600,
+                  note:
+                    "The video bytes are fetched only when the returned file link is opened by the client.",
+                },
+                null,
+                2,
+              ),
+            },
+            {
+              type: "resource_link" as const,
+              uri: downloadUrl,
+              name: fileName,
+              title: itemTitle,
+              description:
+                "Short lived module video download. Opening this link triggers the server side video fetch.",
+              mimeType: "video/mp4",
+            },
+          ],
+        };
+      } catch (error) {
+        return fail(error);
+      }
     },
   );
 
