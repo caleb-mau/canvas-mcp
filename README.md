@@ -82,6 +82,9 @@ Set these environment variables:
 | `CANVAS_MAX_PAGES` |  | Maximum Canvas pagination pages per call, default `20` |
 | `CANVAS_TIMEOUT_MS` |  | Request timeout, default `30000` |
 | `CANVAS_MAX_REMOTE_FILE_MB` |  | Maximum hosted file download size, default `50` |
+| `CANVAS_MAX_VIDEO_MB` |  | Maximum explicitly requested module video size, default `250` |
+| `VIDEO_DOWNLOAD_SECRET` |  | Optional separate HMAC secret for short lived video links |
+| `YTDLP_BINARY_PATH` |  | Optional path to an installed yt-dlp executable |
 
 Your remote MCP endpoint is:
 
@@ -209,6 +212,36 @@ Read everything my teacher put in the Week 7 module.
 What comes after this page in the module?
 Which module items are still incomplete?
 ```
+
+## Module video downloads
+
+Module reading never downloads video bytes automatically.
+
+When module content contains a supported public video URL, module content results expose a `video_urls` list. This can detect common YouTube and Vimeo links as well as direct media URLs found in Canvas page or module content.
+
+If the user explicitly asks for the video file, `canvas_download_module_video`:
+
+1. Re-fetches the requested Canvas module item
+2. Resolves its linked Canvas content
+3. Verifies the selected video URL actually appears in that module item
+4. Creates a short lived signed file link
+5. Downloads or streams the media only when the client opens that link
+
+YouTube and similar public video pages use `yt-dlp` when a direct MP4 is not available. The server does not pass Canvas credentials, cookies, browser sessions, or login data to yt-dlp, and it does not attempt to bypass DRM.
+
+On Vercel Linux x64, canvas-mcp can bootstrap the pinned official yt-dlp standalone binary into ephemeral `/tmp` storage on the first explicit video request. The binary is SHA 256 verified before execution. Other hosts can provide an existing binary with `YTDLP_BINARY_PATH`.
+
+Video download links are stateless HMAC signed URLs with a ten minute lifetime. No download database or media cache is required.
+
+Environment options:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `CANVAS_MAX_VIDEO_MB` | `250` | Maximum explicitly requested video size |
+| `VIDEO_DOWNLOAD_SECRET` | `MCP_AUTH_TOKEN` | Optional separate signing secret |
+| `YTDLP_BINARY_PATH` | automatic | Path to an installed yt-dlp binary |
+
+Only download media you are authorized to access and save. Site terms and copyright rules still apply.
 
 ## File submissions
 
