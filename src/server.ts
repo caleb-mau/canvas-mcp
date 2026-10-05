@@ -7,6 +7,13 @@ const id = z.union([z.string(), z.number()]).transform(String);
 const scalar = z.union([z.string(), z.number(), z.boolean(), z.null()]);
 const querySchema = z.record(z.string(), z.union([scalar, z.array(scalar)])).optional();
 
+const fileReferenceSchema = z.object({
+  download_url: z.string().url(),
+  file_id: z.string().min(1),
+  mime_type: z.string().optional(),
+  file_name: z.string().optional(),
+}).strict();
+
 const confirmationSchema = z.object({
   confirm: z.boolean().meta({ title: "Confirm Canvas change" }),
 });
@@ -64,8 +71,13 @@ async function confirmationMessage(
       const title = await assignmentTitle(client, args.course_id, args.assignment_id);
       return [
         'Upload and submit this file to "' + title + '" in Canvas?',
-        "No file will be uploaded and the assignment will not be submitted unless you confirm.",
-        "File: " + args.file_path,
+        "No file will be downloaded, uploaded, or submitted unless you confirm.",
+        "File: " + (
+          args.file?.file_name ||
+          args.file?.file_id ||
+          args.file_path ||
+          "(unnamed file)"
+        ),
       ].join("\n\n");
     }
     case "canvas_post_discussion_entry":
@@ -163,6 +175,7 @@ function tool(
   description: string,
   inputSchema: z.ZodType,
   handler: (args: any, client: CanvasClient) => Promise<unknown>,
+  extraMeta: Record<string, unknown> = {},
 ): void {
   server.registerTool(
     name,
@@ -171,6 +184,7 @@ function tool(
       inputSchema,
       _meta: {
         securitySchemes: [{ type: "oauth2", scopes: ["mcp"] }],
+        ...extraMeta,
       },
     },
     async (args, ctx) => {
@@ -398,24 +412,61 @@ export function createServer(): McpServer {
   tool(
     server,
     "canvas_submit_file",
-    "Upload a local file using Canvas's official upload flow, then submit it as online_upload. Only use after the user explicitly asks to submit or turn it in. Confirmation happens before the upload begins.",
+    "Submit a file to a Canvas assignment using Canvas's official upload flow. In hosted clients such as ChatGPT, pass a file object supplied by the client. Local stdio clients may pass file_path instead. The file can originate from any compatible source; Canvas MCP is not tied to Google Drive or any other storage provider. Only use after the user explicitly asks to submit or turn it in. Confirmation happens before any remote download or Canvas upload begins.",
     z.object({
       course_id: id,
       assignment_id: id,
-      file_path: z.string().min(1),
+      file: fileReferenceSchema.optional(),
+      file_path: z.string().min(1).optional(),
       comment: z.string().optional(),
-    }),
-    async ({ course_id, assignment_id, file_path, comment }, client) => {
-      const uploaded = await client.uploadSubmissionFile(course_id, assignment_id, file_path);
+    }).refine(
+      (value) => Boolean(value.file) !== Boolean(value.file_path),
+      {
+        message: "Provide exactly one of file or file_path.",
+        path: ["file"],
+      },
+    ),
+    async ({ course_id, assignment_id, file, file_path, comment }, client) => {
+      const uploaded = file
+        ? await client.uploadSubmissionFileReference(
+            course_id,
+            assignment_id,
+            file,
+          )
+        : await client.uploadSubmissionFile(
+            course_id,
+            assignment_id,
+            file_path,
+          );
+
       const fileId = uploaded.id;
       if (fileId === undefined || fileId === null) {
-        throw new CanvasApiError("Canvas uploaded the file but did not return a file id.", undefined, uploaded);
+        throw new CanvasApiError(
+          "Canvas uploaded the file but did not return a file id.",
+          undefined,
+          uploaded,
+        );
       }
-      const submission = await client.post(apiPath("courses", course_id, "assignments", assignment_id, "submissions"), {
-        submission: { submission_type: "online_upload", file_ids: [fileId] },
-        ...(comment ? { comment: { text_comment: comment } } : {}),
-      });
-      return { uploaded_file: uploaded, submission: submission.data };
+
+      const submission = await client.post(
+        apiPath("courses", course_id, "assignments", assignment_id, "submissions"),
+        {
+          submission: {
+            submission_type: "online_upload",
+            file_ids: [fileId],
+          },
+          ...(comment ? { comment: { text_comment: comment } } : {}),
+        },
+      );
+
+      return {
+        source: file ? "file_reference" : "local_path",
+        uploaded_file: uploaded,
+        submission: submission.data,
+      };
+    },
+    {
+      "openai/fileParams": ["file"],
     },
   );
 
