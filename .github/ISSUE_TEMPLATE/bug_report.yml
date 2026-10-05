@@ -1,0 +1,86 @@
+name: Bug report
+description: Report a reproducible problem in canvas-mcp
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please remove all real Canvas tokens, student information, grades, submissions, and school records before posting.
+
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Write mode
+      options:
+        - read_only
+        - student
+        - teacher
+        - full
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: transport
+    attributes:
+      label: How are you running canvas-mcp?
+      options:
+        - Remote HTTP on Vercel
+        - Remote HTTP on another host
+        - Local stdio
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: client
+    attributes:
+      label: MCP client
+      description: For example, ChatGPT, Claude Desktop, or another MCP host.
+      placeholder: ChatGPT
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      placeholder: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      placeholder: What happened instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Use sanitized or fictional data only.
+      placeholder: |
+        1. Connect the MCP
+        2. Call ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs or error output
+      render: shell
+      description: Do not include access tokens or student records.
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed tokens, student records, and other private education data from this report.
+          required: true
