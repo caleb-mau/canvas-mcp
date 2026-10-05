@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { CanvasClient, toFormBody } from "../src/canvas";
-import { normalizeBaseUrl } from "../src/config";
+import { confirmationRequired, normalizeBaseUrl } from "../src/config";
 import { bearerTokenMatches } from "../src/http";
 
 test("normalizeBaseUrl accepts a district hostname", () => {
@@ -100,4 +100,22 @@ test("teacher mode blocks account level writes", async () => {
     () => client.put("/api/v1/accounts/1/courses/2", { course: { name: "Example" } }),
     /teacher blocks account-level or administrative mutation/
   );
+});
+
+
+test("explicit Canvas confirmation is on by default", () => {
+  const previous = process.env.CANVAS_REQUIRE_CONFIRMATION;
+  try {
+    delete process.env.CANVAS_REQUIRE_CONFIRMATION;
+    assert.equal(confirmationRequired(), true);
+
+    process.env.CANVAS_REQUIRE_CONFIRMATION = "false";
+    assert.equal(confirmationRequired(), false);
+
+    process.env.CANVAS_REQUIRE_CONFIRMATION = "true";
+    assert.equal(confirmationRequired(), true);
+  } finally {
+    if (previous === undefined) delete process.env.CANVAS_REQUIRE_CONFIRMATION;
+    else process.env.CANVAS_REQUIRE_CONFIRMATION = previous;
+  }
 });
