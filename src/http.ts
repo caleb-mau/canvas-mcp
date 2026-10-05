@@ -1,6 +1,7 @@
+import { timingSafeEqual } from "node:crypto";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { createServer } from "./server";
-import { canonicalOrigin, oauthResource, validMcpBearer } from "./oauth";
+import { canonicalOrigin, validMcpBearer } from "./oauth";
 
 const handler = createMcpHandler(() => createServer());
 
@@ -8,7 +9,9 @@ export function bearerTokenMatches(header: string | null, expectedToken: string)
   if (!header) return false;
   const match = /^Bearer\s+(.+)$/i.exec(header.trim());
   if (!match) return false;
-  return match[1] === expectedToken;
+  const provided = Buffer.from(match[1], "utf8");
+  const expected = Buffer.from(expectedToken, "utf8");
+  return provided.length === expected.length && timingSafeEqual(provided, expected);
 }
 
 function bearerValue(header: string | null): string | null {
@@ -56,9 +59,6 @@ export async function handleRemoteMcp(request: Request): Promise<Response> {
       token: bearer,
       clientId: "oauth-or-self-hosted-client",
       scopes: ["mcp"],
-      extra: {
-        resource: oauthResource(origin),
-      },
     },
   });
 }
