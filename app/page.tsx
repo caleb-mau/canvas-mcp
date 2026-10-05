@@ -30,8 +30,8 @@ export default function Home() {
         <h1>Your Canvas account, available over MCP.</h1>
         <p className="lead">
           A self hosted bridge from AI clients to Canvas LMS. Your Canvas access
-          token stays on this deployment. Remote MCP callers authenticate with a
-          separate bearer token.
+          token stays on this deployment. ChatGPT can connect through the built in
+          OAuth flow, while other clients can use the same MCP secret directly.
         </p>
 
         <div className="status">
@@ -49,8 +49,8 @@ export default function Home() {
             <code>/mcp</code>
           </div>
           <div>
-            <h2>Authentication</h2>
-            <code>Authorization: Bearer MCP_AUTH_TOKEN</code>
+            <h2>ChatGPT authentication</h2>
+            <code>OAuth 2.1 + PKCE, backed by MCP_AUTH_TOKEN</code>
           </div>
         </div>
 
@@ -60,9 +60,10 @@ export default function Home() {
         </div>
 
         <p className="foot">
-          Reading and drafting do not submit work. Assignment submissions,
-          grading, messages, discussion posts, and raw mutating API calls ask
-          for end user confirmation by default. Canvas permissions still apply.
+          In ChatGPT, add this deployment's /mcp URL and choose OAuth. When the
+          authorization page opens, enter the MCP_AUTH_TOKEN from this deployment.
+          Reading and drafting do not submit work. Protected writes ask for end
+          user confirmation by default.
         </p>
       </section>
     </main>
