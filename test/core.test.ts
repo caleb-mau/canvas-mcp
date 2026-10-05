@@ -91,6 +91,10 @@ test("teacher mode redacts roster identity fields", async () => {
     assert.equal(await client.resolveStudentRef("123", studentRef), "42");
     assert.ok(!JSON.stringify(roster).includes("Example Student"));
     assert.ok(!JSON.stringify(roster).includes("example_login"));
+    assert.equal("grades" in roster[0], false);
+
+    const expandedRoster = await client.teacherStudents("123", true);
+    assert.equal("grades" in expandedRoster[0], true);
   } finally {
     globalThis.fetch = originalFetch;
   }
