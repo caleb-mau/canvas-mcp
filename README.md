@@ -28,6 +28,7 @@ The project is intentionally self hosted. There is no required account database,
 | Capability | Included |
 | --- | :---: |
 | Courses, assignments, grades, modules, pages | ✅ |
+| Full module reading and module item content resolution | ✅ |
 | Submission history and recently graded work | ✅ |
 | Text, URL, and file submissions | ✅ |
 | Discussions and Canvas Inbox | ✅ |
@@ -177,6 +178,36 @@ Example stdio MCP configuration:
     }
   }
 }
+```
+
+## Module first courses
+
+Some Canvas courses are organized primarily through **Modules** rather than the Assignments page. canvas-mcp treats modules as first class course content.
+
+Module tools can:
+
+* List modules in course order
+* Get one module and its completion or lock state
+* List every module item in order
+* Get one module item with completion requirements and content details
+* Resolve a module item into its underlying Canvas content
+* Read an entire module end to end
+* Find the previous and next item in the teacher's module sequence
+* Mark supported module items read, done, or not done
+
+`canvas_get_module_item_content` and `canvas_read_module` understand Canvas module item types such as pages, files, assignments, quizzes, discussions, subheaders, external URLs, and external tools.
+
+For Canvas hosted content, the MCP follows the linked Canvas API object. That means a module page can return its actual page body, an assignment can include the current submission, and a file can return its Canvas metadata.
+
+External URLs and external tools are returned as targets but are not automatically browsed.
+
+Example requests include:
+
+```text
+What do I need to do in Unit 4?
+Read everything my teacher put in the Week 7 module.
+What comes after this page in the module?
+Which module items are still incomplete?
 ```
 
 ## File submissions
