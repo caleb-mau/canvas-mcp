@@ -418,10 +418,14 @@ export class CanvasClient {
     return this.redactWithIdentities(value, identities, Boolean(courseId));
   }
 
-  async teacherStudents(courseId: string): Promise<Record<string, unknown>[]> {
-    if (this.writeMode !== "teacher" && this.writeMode !== "full") {
-      throw new CanvasApiError("Teacher roster tools require CANVAS_WRITE_MODE=teacher or full.");
+  requireTeacherMode(): void {
+    if (this.writeMode !== "teacher") {
+      throw new CanvasApiError("This tool requires CANVAS_WRITE_MODE=teacher so student identity redaction is guaranteed.");
     }
+  }
+
+  async teacherStudents(courseId: string): Promise<Record<string, unknown>[]> {
+    this.requireTeacherMode();
 
     const raw = await this.request<Record<string, unknown>[]>(
       "GET",
@@ -457,6 +461,7 @@ export class CanvasClient {
   }
 
   async resolveStudentRef(courseId: string, studentRef: string): Promise<string> {
+    this.requireTeacherMode();
     if (!studentRef.startsWith("student_")) {
       throw new CanvasApiError("Teacher tools require a redacted student_ref, not a raw Canvas user id.");
     }
