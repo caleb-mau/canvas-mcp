@@ -117,8 +117,9 @@ Then configure your MCP client to launch:
 {
   "mcpServers": {
     "canvas": {
-      "command": "node",
-      "args": ["/absolute/path/to/canvas-mcp/dist-cli/src/index.js"]
+      "command": "npm",
+      "args": ["run", "start:stdio", "--silent"],
+      "cwd": "/absolute/path/to/canvas-mcp"
     }
   }
 }
