@@ -27,9 +27,9 @@ export async function runTerminalSetup(): Promise<void> {
   try {
     const baseUrl = await rl.question(`Canvas base URL${existing.baseUrl ? ` [${existing.baseUrl}]` : ""}: `);
     const accessToken = await rl.question(`Canvas access token${existing.accessToken ? " [leave blank to keep current token]" : ""}: `);
-    const modeAnswer = await rl.question(`Write mode, read_only, student, or full [${existing.writeMode || "student"}]: `);
+    const modeAnswer = await rl.question(`Write mode, read_only, student, teacher, or full [${existing.writeMode || "student"}]: `);
     const writeMode = (modeAnswer.trim() || existing.writeMode || "student") as WriteMode;
-    if (!["read_only", "student", "full"].includes(writeMode)) throw new Error("Invalid write mode.");
+    if (!["read_only", "student", "teacher", "full"].includes(writeMode)) throw new Error("Invalid write mode.");
 
     const config: StoredConfig = {
       baseUrl: baseUrl.trim() || existing.baseUrl,
@@ -108,8 +108,8 @@ export async function runWebSetup(): Promise<void> {
 <form method="post" action="/save">
 <label for="baseUrl">Canvas base URL</label><input id="baseUrl" name="baseUrl" required placeholder="https://school.instructure.com" value="${escapeHtml(existing.baseUrl || "")}">
 <label for="accessToken">Canvas personal access token</label><input id="accessToken" name="accessToken" type="password" ${existing.accessToken ? "" : "required"} placeholder="${existing.accessToken ? "Leave blank to keep the saved token" : "Paste token from Canvas Account Settings"}">
-<label for="writeMode">Write mode</label><select id="writeMode" name="writeMode"><option value="read_only" ${existing.writeMode === "read_only" ? "selected" : ""}>read_only</option><option value="student" ${!existing.writeMode || existing.writeMode === "student" ? "selected" : ""}>student</option><option value="full" ${existing.writeMode === "full" ? "selected" : ""}>full</option></select>
-<p class="muted"><strong>student</strong> allows normal student actions such as submitting work, posting discussions, and messaging. <strong>full</strong> also enables arbitrary mutating calls through the low level Canvas API tool.</p>
+<label for="writeMode">Write mode</label><select id="writeMode" name="writeMode"><option value="read_only" ${existing.writeMode === "read_only" ? "selected" : ""}>read_only</option><option value="student" ${!existing.writeMode || existing.writeMode === "student" ? "selected" : ""}>student</option><option value="teacher" ${existing.writeMode === "teacher" ? "selected" : ""}>teacher</option><option value="full" ${existing.writeMode === "full" ? "selected" : ""}>full</option></select>
+<p class="muted"><strong>student</strong> allows normal student actions such as submitting work, posting discussions, and messaging. <strong>teacher</strong> enables course management and grading while pseudonymizing student identities before responses reach the model. <strong>full</strong> also enables unrestricted mutating calls through the low level Canvas API tool.</p>
 <label for="maxPages">Maximum pages per paginated tool call</label><input id="maxPages" name="maxPages" type="number" min="1" max="200" value="${existing.maxPages || 20}">
 <label for="timeoutMs">Request timeout in milliseconds</label><input id="timeoutMs" name="timeoutMs" type="number" min="1000" max="300000" value="${existing.timeoutMs || 30000}">
 <button type="submit">Test connection and save</button></form></main></body></html>`);
