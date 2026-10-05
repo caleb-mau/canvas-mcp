@@ -43,13 +43,36 @@ After deployment, your MCP endpoint is:
 https://your-deployment.example/mcp
 ```
 
-Authenticate the MCP client with:
+### ChatGPT
+
+ChatGPT currently expects OAuth for authenticated custom MCP connections.
+
+Canvas MCP includes a small built in OAuth 2.1 compatibility layer, so you do not need Auth0, Clerk, a database, or a separate OAuth provider.
+
+In ChatGPT:
+
+1. Add your deployed MCP URL, for example `https://your-deployment.example/mcp`
+2. Choose OAuth authentication
+3. ChatGPT discovers the OAuth endpoints automatically
+4. A Canvas MCP authorization page opens
+5. Enter the same `MCP_AUTH_TOKEN` you configured in Vercel
+6. Approve the connection
+
+There is no OAuth client ID or client secret for you to configure. ChatGPT identifies itself using its own Client ID Metadata Document and uses PKCE.
+
+Canvas authentication is unchanged. The server still uses `CANVAS_ACCESS_TOKEN` privately to talk to Canvas.
+
+### Other MCP clients
+
+Clients that support a normal bearer token can skip the OAuth browser flow and authenticate directly with:
 
 ```
 Authorization: Bearer YOUR_MCP_AUTH_TOKEN
 ```
 
-That is it. The Canvas token stays on the server. The MCP caller uses only the separate MCP token.
+The OAuth layer and the direct bearer path protect the same self hosted MCP instance.
+
+That is it. The Canvas token stays on the server. The MCP caller never receives the Canvas token.
 
 ## Get a Canvas access token
 
@@ -214,12 +237,32 @@ The Canvas bearer token is never forwarded to an unrelated origin.
 | --- | --- | --- |
 | `CANVAS_BASE_URL` | required | Canvas origin |
 | `CANVAS_ACCESS_TOKEN` | required | Personal Canvas access token |
-| `MCP_AUTH_TOKEN` | required for remote mode | Protects the remote MCP endpoint |
+| `MCP_AUTH_TOKEN` | required for remote mode | Protects the remote MCP endpoint and acts as the single user secret for the built in OAuth flow |
 | `CANVAS_WRITE_MODE` | `student` | Permission boundary |
 | `CANVAS_REQUIRE_CONFIRMATION` | `true` | Requires end user confirmation for protected writes |
 | `CANVAS_MAX_PAGES` | `20` | Maximum Canvas pagination pages followed per call |
 | `CANVAS_TIMEOUT_MS` | `30000` | Canvas request timeout |
 | `CANVAS_REDACTION_KEY` | automatic fallback | Stable teacher mode aliases |
+
+## How the built in OAuth works
+
+The OAuth layer exists for MCP clients such as ChatGPT that require OAuth discovery and an authorization code flow.
+
+It publishes:
+
+* Protected resource metadata
+* OAuth authorization server metadata
+* Authorization code flow
+* PKCE with S256
+* Short lived access tokens
+* Refresh tokens
+* The `resource` audience binding required by MCP authorization
+
+It is intentionally single user. The authorization page verifies `MCP_AUTH_TOKEN`, then the server issues signed OAuth tokens for that deployment.
+
+There is still no account database and no Canvas OAuth.
+
+Rotating `MCP_AUTH_TOKEN` immediately invalidates OAuth tokens signed with the old secret.
 
 ## Security
 
