@@ -1,7 +1,7 @@
 {
   "name": "canvas-mcp",
   "version": "0.1.0",
-  "description": "Self hosted Canvas LMS MCP server for local stdio or remote HTTP",
+  "description": "Self hosted Canvas LMS MCP server for ChatGPT, Claude, and other MCP clients",
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -35,10 +35,21 @@
   "keywords": [
     "canvas",
     "canvas-lms",
+    "instructure",
     "mcp",
     "model-context-protocol",
-    "instructure",
+    "chatgpt",
+    "claude",
+    "education",
     "vercel",
     "self-hosted"
-  ]
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/caleb-mau/canvas-mcp.git"
+  },
+  "homepage": "https://github.com/caleb-mau/canvas-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/caleb-mau/canvas-mcp/issues"
+  }
 }
