@@ -175,7 +175,7 @@ Dedicated tools cover common Canvas work:
 
 There is also a low level `canvas_api` tool for Canvas REST endpoints that do not have a dedicated tool.
 
-GET requests are read only. Raw mutating calls require confirmation by default and still obey the configured write mode.
+GET requests are read only. Raw mutating calls are advertised as consequential writes and still obey the configured write mode.
 
 ## Write modes
 
@@ -227,28 +227,27 @@ Pseudonymized student references are not represented as legally de identified re
 
 See [PRIVACY.md](PRIVACY.md) for the full privacy design and no database architecture.
 
-## Confirmation behavior
+## Native write approvals
 
-By default:
+Canvas MCP uses standard MCP tool annotations so capable hosts such as ChatGPT can show their own approval UI before consequential actions run.
 
-```
-CANVAS_REQUIRE_CONFIRMATION=true
-```
+Every tool explicitly declares:
 
-Confirmation protected actions include:
+* `readOnlyHint`
+* `destructiveHint`
+* `openWorldHint`
 
-* Assignment text submissions
-* Assignment URL submissions
-* Assignment file uploads and submissions
-* Discussion posts and replies
-* Canvas Inbox messages
-* Teacher grade changes and comments
-* Teacher messages
-* Any non GET request through `canvas_api`
+Assignment submissions, discussion posts, Canvas Inbox messages, teacher grading changes, teacher messages, and the raw mutating API tool are marked as destructive writes.
 
-For file submissions, confirmation occurs **before the upload starts**.
+Read tools are explicitly marked read only.
 
-Small local state actions such as marking a module item complete are not currently confirmation gated.
+`canvas_submit_file` is also marked open world because it can retrieve a client supplied HTTPS file reference before uploading those bytes to Canvas. Normal Canvas tools are bounded to the configured private Canvas workspace and are marked not open world.
+
+The MCP server no longer uses MCP elicitation as a confirmation popup. ChatGPT's current connector client does not advertise the elicitation capability required by that flow. Instead, write approval is delegated to the host's native tool approval system.
+
+Tool annotations are safety metadata, not authorization. Canvas permissions, write modes, OAuth, input validation, explicit submit intent in tool descriptions, and teacher privacy protections remain enforced independently.
+
+A client that does not implement native approval UI may execute an allowed write without an additional server popup. For that reason, users should choose an MCP client whose write approval behavior matches their needs.
 
 ## File submissions
 
@@ -277,7 +276,7 @@ This is source agnostic. The file can come from Google Drive, another compatible
 For a hosted file reference, the flow is:
 
 1. The MCP client supplies the temporary file reference
-2. The user confirms the Canvas submission
+2. The MCP host presents its native write approval when supported
 3. Canvas MCP securely downloads the file bytes
 4. Canvas MCP asks Canvas for an upload target
 5. Canvas MCP uploads the bytes to that target
@@ -294,7 +293,7 @@ The default remote file limit is 50 MB and can be changed with:
 CANVAS_MAX_REMOTE_FILE_MB=50
 ```
 
-Confirmation happens before the remote file is downloaded, so cancelling the submission does not fetch or upload the file.
+In hosts that honor the destructive write annotation, native approval happens before the tool executes, so declining the action prevents the remote file download and Canvas upload.
 
 ## Environment variables
 
@@ -304,7 +303,6 @@ Confirmation happens before the remote file is downloaded, so cancelling the sub
 | `CANVAS_ACCESS_TOKEN` | required | Personal Canvas access token |
 | `MCP_AUTH_TOKEN` | required for remote mode | Protects the remote MCP endpoint and acts as the single user secret for the built in OAuth flow |
 | `CANVAS_WRITE_MODE` | `student` | Permission boundary |
-| `CANVAS_REQUIRE_CONFIRMATION` | `true` | Requires end user confirmation for protected writes |
 | `CANVAS_MAX_PAGES` | `20` | Maximum Canvas pagination pages followed per call |
 | `CANVAS_TIMEOUT_MS` | `30000` | Canvas request timeout |
 | `CANVAS_MAX_REMOTE_FILE_MB` | `50` | Maximum downloaded MCP file size before Canvas upload |
