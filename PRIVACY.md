@@ -105,7 +105,7 @@ Canvas MCP adds additional boundaries:
 * `teacher` permits course level teacher actions while enabling student pseudonymization
 * `full` exposes the wider Canvas permission surface and should be used deliberately
 
-Protected writes require end user confirmation by default.
+Consequential writes are explicitly annotated so capable MCP hosts can present native end user approval before execution. Tool annotations do not replace Canvas permissions or server side authorization.
 
 ## External AI providers
 
@@ -118,7 +118,7 @@ Before using teacher mode with real student records, schools and teachers should
 For the most privacy conscious teacher setup:
 
 1. Use `CANVAS_WRITE_MODE=teacher`
-2. Keep `CANVAS_REQUIRE_CONFIRMATION=true`
+2. Use an MCP client that honors destructive write approvals
 3. Set a strong `CANVAS_REDACTION_KEY`
 4. Keep the deployment private
 5. Do not enable `full` unless genuinely required

@@ -62,8 +62,9 @@ export default function Home() {
         <p className="foot">
           In ChatGPT, add this deployment's /mcp URL and choose OAuth. When the
           authorization page opens, enter the MCP_AUTH_TOKEN from this deployment.
-          Reading and drafting do not submit work. Protected writes ask for end
-          user confirmation by default.
+          Reading and drafting do not submit work. Consequential Canvas writes
+          are marked destructive so capable MCP hosts can show their native
+          approval UI before execution.
         </p>
       </section>
     </main>
