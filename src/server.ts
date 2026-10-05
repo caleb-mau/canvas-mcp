@@ -67,7 +67,8 @@ async function confirmationMessage(
         "URL: " + args.url,
       ].join("\n\n");
     }
-    case "canvas_submit_file": {
+    case "canvas_submit_file":
+    case "canvas_submit_local_file": {
       const title = await assignmentTitle(client, args.course_id, args.assignment_id);
       return [
         'Upload and submit this file to "' + title + '" in Canvas?',
@@ -412,32 +413,19 @@ export function createServer(): McpServer {
   tool(
     server,
     "canvas_submit_file",
-    "Submit a file to a Canvas assignment using Canvas's official upload flow. In hosted clients such as ChatGPT, pass a file object supplied by the client. Local stdio clients may pass file_path instead. The file can originate from any compatible source; Canvas MCP is not tied to Google Drive or any other storage provider. Only use after the user explicitly asks to submit or turn it in. Confirmation happens before any remote download or Canvas upload begins.",
+    "Submit a client supplied file to a Canvas assignment using Canvas's official upload flow. In ChatGPT, the model facing signature may display file as a string because ChatGPT represents connector managed files as opaque file handles. Pass the connector or uploaded file reference into the file parameter anyway. ChatGPT resolves that handle to the supported file object before the MCP server receives it. Do not use a local filesystem path with this tool. The file may originate from Google Drive, another connector, a user upload, or any compatible source. Only use after the user explicitly asks to submit or turn it in. Confirmation happens before any remote file download or Canvas upload begins.",
     z.object({
       course_id: id,
       assignment_id: id,
-      file: fileReferenceSchema.optional(),
-      file_path: z.string().min(1).optional(),
+      file: fileReferenceSchema,
       comment: z.string().optional(),
-    }).refine(
-      (value) => Boolean(value.file) !== Boolean(value.file_path),
-      {
-        message: "Provide exactly one of file or file_path.",
-        path: ["file"],
-      },
-    ),
-    async ({ course_id, assignment_id, file, file_path, comment }, client) => {
-      const uploaded = file
-        ? await client.uploadSubmissionFileReference(
-            course_id,
-            assignment_id,
-            file,
-          )
-        : await client.uploadSubmissionFile(
-            course_id,
-            assignment_id,
-            file_path,
-          );
+    }),
+    async ({ course_id, assignment_id, file, comment }, client) => {
+      const uploaded = await client.uploadSubmissionFileReference(
+        course_id,
+        assignment_id,
+        file,
+      );
 
       const fileId = uploaded.id;
       if (fileId === undefined || fileId === null) {
@@ -460,13 +448,58 @@ export function createServer(): McpServer {
       );
 
       return {
-        source: file ? "file_reference" : "local_path",
+        source: "file_reference",
         uploaded_file: uploaded,
         submission: submission.data,
       };
     },
     {
       "openai/fileParams": ["file"],
+    },
+  );
+
+  tool(
+    server,
+    "canvas_submit_local_file",
+    "Submit a file from the local filesystem to a Canvas assignment. This is intended for local stdio MCP clients that can see the user's filesystem. Do not use this tool for Google Drive, connector files, ChatGPT uploads, or hosted MCP file references. Only use after the user explicitly asks to submit or turn it in. Confirmation happens before Canvas upload begins.",
+    z.object({
+      course_id: id,
+      assignment_id: id,
+      file_path: z.string().min(1),
+      comment: z.string().optional(),
+    }),
+    async ({ course_id, assignment_id, file_path, comment }, client) => {
+      const uploaded = await client.uploadSubmissionFile(
+        course_id,
+        assignment_id,
+        file_path,
+      );
+
+      const fileId = uploaded.id;
+      if (fileId === undefined || fileId === null) {
+        throw new CanvasApiError(
+          "Canvas uploaded the file but did not return a file id.",
+          undefined,
+          uploaded,
+        );
+      }
+
+      const submission = await client.post(
+        apiPath("courses", course_id, "assignments", assignment_id, "submissions"),
+        {
+          submission: {
+            submission_type: "online_upload",
+            file_ids: [fileId],
+          },
+          ...(comment ? { comment: { text_comment: comment } } : {}),
+        },
+      );
+
+      return {
+        source: "local_path",
+        uploaded_file: uploaded,
+        submission: submission.data,
+      };
     },
   );
 

@@ -252,10 +252,12 @@ Small local state actions such as marking a module item complete are not current
 
 ## File submissions
 
-`canvas_submit_file` supports two file sources:
+File submission is intentionally split into two tools so hosted clients cannot confuse connector files with local paths:
 
-* **Hosted MCP clients:** pass a real MCP file object in `file`
-* **Local stdio clients:** pass a filesystem path in `file_path`
+* **`canvas_submit_file`** for hosted or connector supplied files
+* **`canvas_submit_local_file`** for a local filesystem path in stdio mode
+
+For ChatGPT, `canvas_submit_file` has one required file input named `file`. ChatGPT may render that file input to the model as an opaque string handle. That is expected. The model should pass the connector managed or uploaded file reference into `file`; ChatGPT resolves it to the actual file object before the MCP server receives the call.
 
 For ChatGPT, the tool declares `_meta["openai/fileParams"] = ["file"]`. ChatGPT can therefore hand the tool an authorized file reference instead of asking the user or model to paste a download URL.
 
@@ -282,7 +284,7 @@ For a hosted file reference, the flow is:
 6. Canvas completes the upload and returns a Canvas file ID
 7. Canvas MCP submits that Canvas file ID to the assignment
 
-For a local `file_path`, the same Canvas upload flow starts from the local file bytes instead.
+For local stdio usage, call `canvas_submit_local_file` with `file_path`. The hosted `canvas_submit_file` tool does not accept `file_path`, which prevents ChatGPT from accidentally putting a connector file reference into the wrong field.
 
 Remote file downloads must use HTTPS. Canvas MCP rejects localhost and private network targets, validates redirect targets, does not forward Canvas credentials to the file source, and enforces a configurable download size limit.
 
