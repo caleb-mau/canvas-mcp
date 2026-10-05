@@ -187,7 +187,9 @@ When the model grades or messages that student, the server resolves the alias to
 
 Known names, emails, login IDs, SIS IDs, avatar URLs, and raw Canvas user IDs are removed or replaced before teacher mode results are returned.
 
-No alias database is required. Aliases are derived with HMAC from the server side redaction key.
+No alias database is required. Aliases are derived with HMAC from the server side redaction key. Course data uses course scoped aliases. Teacher responses outside a specific course use context scoped aliases rather than a universal student identifier.
+
+The teacher roster also follows a minimum necessary default: grades and activity history are omitted unless `include_academic_context` is explicitly requested.
 
 Teacher mode is identity protection, not a general data loss prevention system. Free form student content can still contain personal information that Canvas does not identify separately.
 
@@ -196,6 +198,18 @@ Teacher mode is identity protection, not a general data loss prevention system. 
 Allows arbitrary same origin Canvas REST mutations permitted by the configured Canvas token.
 
 Use this only when you intentionally want the full Canvas permission surface.
+
+## FERPA conscious workflows
+
+Canvas MCP is designed to make privacy preserving workflows easier without requiring a student database.
+
+Teacher mode pseudonymizes known student identities, keeps mappings stateless, minimizes roster data by default, avoids application payload logging, and instructs remote clients and caches not to store MCP responses.
+
+This is deliberately described as **FERPA conscious**, not automatically **FERPA compliant**. Whether a real deployment satisfies FERPA depends on the school, the user's legitimate educational interest, district approval, the AI provider, hosting, retention terms, and how records are used.
+
+Pseudonymized student references are not represented as legally de identified records.
+
+See [PRIVACY.md](PRIVACY.md) for the full privacy design and no database architecture.
 
 ## Confirmation behavior
 
