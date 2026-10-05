@@ -79,7 +79,7 @@ function validateParams(
   if (!validClientId(params.clientId)) {
     return "The OAuth client_id must be an HTTPS Client ID Metadata Document URL.";
   }
-  if (!validRedirectUri(params.redirectUri)) {
+  if (!validRedirectUri(params.redirectUri, params.clientId)) {
     return "The OAuth redirect_uri is invalid.";
   }
   if (params.codeChallengeMethod !== "S256") {
