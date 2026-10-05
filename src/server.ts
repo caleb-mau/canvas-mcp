@@ -169,7 +169,6 @@ function tool(
     {
       description,
       inputSchema,
-      securitySchemes: [{ type: "oauth2", scopes: ["mcp"] }],
       _meta: {
         securitySchemes: [{ type: "oauth2", scopes: ["mcp"] }],
       },
@@ -224,7 +223,6 @@ export function createServer(): McpServer {
     {
       description: "Verify the Canvas connection and show local configuration with the access token redacted.",
       inputSchema: z.object({}),
-      securitySchemes: [{ type: "oauth2", scopes: ["mcp"] }],
       _meta: {
         securitySchemes: [{ type: "oauth2", scopes: ["mcp"] }],
       },
