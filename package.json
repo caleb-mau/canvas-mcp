@@ -7,24 +7,16 @@
   "engines": {
     "node": ">=20"
   },
-  "bin": {
-    "canvas-mcp": "dist-cli/src/index.js"
-  },
-  "files": [
-    "dist-cli",
-    "README.md",
-    "LICENSE"
-  ],
   "scripts": {
     "dev": "next dev",
     "dev:stdio": "tsx src/index.ts",
-    "build": "next build && tsc -p tsconfig.cli.json",
+    "build": "next build",
     "start": "next start",
-    "start:stdio": "node dist-cli/src/index.js",
+    "start:stdio": "tsx src/index.ts",
     "setup": "tsx src/index.ts setup",
     "setup:web": "tsx src/index.ts setup --web",
     "test": "tsx --test test/*.test.ts",
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.cli.json --noEmit"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.3.0",
