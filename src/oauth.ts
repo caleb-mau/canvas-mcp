@@ -7,6 +7,8 @@ import {
 
 export const MCP_SCOPE = "mcp";
 export const OFFLINE_SCOPE = "offline_access";
+export const CHATGPT_CIMD_CLIENT_ID = "https://chatgpt.com/oauth/client.json";
+export const CHATGPT_OAUTH_REDIRECT = "https://chatgpt.com/connector_platform_oauth_redirect";
 const ACCESS_TTL_SECONDS = 60 * 60;
 const REFRESH_TTL_SECONDS = 60 * 60 * 24 * 30;
 const CODE_TTL_SECONDS = 90;
@@ -229,25 +231,18 @@ export function verifyDeploymentSecret(value: string): boolean {
 }
 
 export function validClientId(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:";
-  } catch {
-    return false;
-  }
+  return safeEqualText(value, CHATGPT_CIMD_CLIENT_ID);
 }
 
-export function validRedirectUri(value: string): boolean {
-  try {
-    const url = new URL(value);
-    if (url.protocol === "https:") return true;
-    return (
-      url.protocol === "http:" &&
-      ["localhost", "127.0.0.1", "::1"].includes(url.hostname)
-    );
-  } catch {
-    return false;
+export function validRedirectUri(
+  value: string,
+  clientId?: string,
+): boolean {
+  if (clientId === CHATGPT_CIMD_CLIENT_ID) {
+    return safeEqualText(value, CHATGPT_OAUTH_REDIRECT);
   }
+
+  return false;
 }
 
 export function validCodeChallenge(value: string): boolean {

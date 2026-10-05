@@ -6,10 +6,14 @@ import { confirmationRequired, normalizeBaseUrl } from "../src/config";
 import { bearerTokenMatches } from "../src/http";
 import {
   authorizationServerMetadata,
+  CHATGPT_CIMD_CLIENT_ID,
+  CHATGPT_OAUTH_REDIRECT,
   issueAccessToken,
   issueAuthorizationCode,
   oauthResource,
   protectedResourceMetadata,
+  validClientId,
+  validRedirectUri,
   verifyPkce,
   verifySignedToken,
 } from "../src/oauth";
@@ -187,4 +191,18 @@ test("OAuth authorization codes are bound to PKCE and the MCP resource", () => {
     if (previous === undefined) delete process.env.MCP_AUTH_TOKEN;
     else process.env.MCP_AUTH_TOKEN = previous;
   }
+});
+
+
+test("OAuth client validation is pinned to ChatGPT CIMD and callback", () => {
+  assert.equal(validClientId(CHATGPT_CIMD_CLIENT_ID), true);
+  assert.equal(validClientId("https://evil.example/client.json"), false);
+  assert.equal(
+    validRedirectUri(CHATGPT_OAUTH_REDIRECT, CHATGPT_CIMD_CLIENT_ID),
+    true,
+  );
+  assert.equal(
+    validRedirectUri("https://evil.example/callback", CHATGPT_CIMD_CLIENT_ID),
+    false,
+  );
 });

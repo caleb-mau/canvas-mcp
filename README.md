@@ -60,6 +60,22 @@ In ChatGPT:
 
 There is no OAuth client ID or client secret for you to configure. ChatGPT identifies itself using its own Client ID Metadata Document and uses PKCE.
 
+If ChatGPT shows **OAuth advanced settings**, the expected values are:
+
+* Registration method: `Client Identifier Metadata Document (CIMD)`
+* Callback URL: `https://chatgpt.com/connector_platform_oauth_redirect`
+* CIMD client metadata URL: `https://chatgpt.com/oauth/client.json`
+* Default scopes: `mcp` and `offline_access`
+* Base scopes: leave empty
+* Auth URL: `https://YOUR_DEPLOYMENT/oauth/authorize`
+* Token URL: `https://YOUR_DEPLOYMENT/oauth/token`
+* Registration URL: leave empty
+* Authorization server base: your deployment origin
+* Resource: your deployment origin
+* OIDC: disabled
+
+The DCR warning is expected because this project intentionally uses CIMD and does not expose Dynamic Client Registration.
+
 Canvas authentication is unchanged. The server still uses `CANVAS_ACCESS_TOKEN` privately to talk to Canvas.
 
 ### Other MCP clients
