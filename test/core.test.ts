@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { CanvasClient, toFormBody } from "../src/canvas";
 import { normalizeBaseUrl } from "../src/config";
 import { bearerTokenMatches } from "../src/http";
-import { canvasToolAnnotations } from "../src/server";
+import { canvasToolAnnotations, resolveModuleItemContent } from "../src/server";
 import {
   authorizationServerMetadata,
   CHATGPT_CIMD_CLIENT_ID,
@@ -324,6 +324,12 @@ test("Canvas tool annotations classify reads and consequential writes", () => {
     openWorldHint: true,
   });
 
+  assert.deepEqual(canvasToolAnnotations("canvas_read_module"), {
+    readOnlyHint: true,
+    destructiveHint: false,
+    openWorldHint: false,
+  });
+
   assert.deepEqual(canvasToolAnnotations("canvas_mark_module_item"), {
     readOnlyHint: false,
     destructiveHint: false,
@@ -335,4 +341,105 @@ test("Canvas tool annotations classify reads and consequential writes", () => {
     () => canvasToolAnnotations("unclassified_tool"),
     /Missing Canvas tool annotations/,
   );
+});
+
+
+test("module item content resolver follows Canvas API targets", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: string[] = [];
+
+  globalThis.fetch = async (input) => {
+    const url = new URL(
+      typeof input === "string"
+        ? input
+        : input instanceof Request
+          ? input.url
+          : input.toString(),
+    );
+    calls.push(url.toString());
+
+    if (url.pathname === "/api/v1/courses/123/pages/unit-4-notes") {
+      return Response.json({
+        page_id: 44,
+        url: "unit-4-notes",
+        title: "Unit 4 Notes",
+        body: "<p>Read these notes before class.</p>",
+      });
+    }
+
+    throw new Error("Unexpected module resolver request: " + url);
+  };
+
+  try {
+    const client = new CanvasClient({
+      baseUrl: "https://canvas.example.invalid",
+      accessToken: "test-token",
+      writeMode: "student",
+      maxPages: 20,
+      timeoutMs: 30000,
+      redactionKey: "test-redaction-key",
+    });
+
+    const resolved = await resolveModuleItemContent(
+      client,
+      "123",
+      {
+        id: 9,
+        module_id: 7,
+        type: "Page",
+        title: "Unit 4 Notes",
+        page_url: "unit-4-notes",
+        url: "https://canvas.example.invalid/api/v1/courses/123/pages/unit-4-notes",
+      },
+    );
+
+    assert.equal(resolved.resolved, true);
+    assert.equal(resolved.kind, "Page");
+    assert.equal(
+      (resolved.content as Record<string, unknown>).title,
+      "Unit 4 Notes",
+    );
+    assert.equal(calls.length, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("module item resolver does not browse external module targets", async () => {
+  const originalFetch = globalThis.fetch;
+  let fetchCalled = false;
+  globalThis.fetch = async () => {
+    fetchCalled = true;
+    throw new Error("External module target should not be fetched");
+  };
+
+  try {
+    const client = new CanvasClient({
+      baseUrl: "https://canvas.example.invalid",
+      accessToken: "test-token",
+      writeMode: "student",
+      maxPages: 20,
+      timeoutMs: 30000,
+      redactionKey: "test-redaction-key",
+    });
+
+    const resolved = await resolveModuleItemContent(
+      client,
+      "123",
+      {
+        id: 10,
+        module_id: 7,
+        type: "ExternalUrl",
+        title: "Reference website",
+        external_url: "https://example.com/reference",
+      },
+    );
+
+    assert.equal(resolved.resolved, false);
+    assert.equal(resolved.kind, "ExternalUrl");
+    assert.equal(resolved.external_url, "https://example.com/reference");
+    assert.equal(fetchCalled, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
