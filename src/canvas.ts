@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, resolve } from "node:path";
 import type { CanvasMcpConfig, WriteMode } from "./config";
@@ -133,11 +134,68 @@ function isStudentMutationAllowed(path: string): boolean {
   return STUDENT_MUTATION_PATTERNS.some((pattern) => pattern.test(path));
 }
 
+function isTeacherMutationAllowed(path: string): boolean {
+  return (
+    /^\/api\/v1\/(?:courses|sections|groups)\/[^/]+(?:\/.*)?$/.test(path) ||
+    /^\/api\/v1\/conversations(?:\/.*)?$/.test(path) ||
+    /^\/api\/v1\/calendar_events(?:\/.*)?$/.test(path) ||
+    /^\/api\/v1\/planner(?:\/.*)?$/.test(path) ||
+    /^\/api\/v1\/users\/self(?:\/.*)?$/.test(path)
+  );
+}
+
+interface StudentIdentity {
+  userId: string;
+  courseId: string;
+  courseAlias: string;
+  globalAlias: string;
+  identifiers: string[];
+}
+
+function courseIdFromPath(path: string): string | undefined {
+  const match = path.match(/^\/api\/v1\/courses\/([^/]+)/);
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
+
+function uniqueStrings(values: unknown[]): string[] {
+  return [...new Set(values.filter((value): value is string =>
+    typeof value === "string" && value.trim().length >= 3
+  ).map((value) => value.trim()))];
+}
+
+function replaceKnownIdentifiers(value: string, identities: StudentIdentity[], courseScoped: boolean): string {
+  let output = value;
+  const replacements = identities
+    .flatMap((identity) => identity.identifiers.map((identifier) => ({
+      identifier,
+      alias: courseScoped ? identity.courseAlias : identity.globalAlias,
+    })))
+    .sort((a, b) => b.identifier.length - a.identifier.length);
+
+  for (const { identifier, alias } of replacements) {
+    if (output.includes(identifier)) output = output.split(identifier).join(alias);
+  }
+  return output;
+}
+
+const USER_ID_KEYS = new Set(["user_id", "student_id", "author_id", "recipient_id", "grader_id"]);
+const USER_NAME_KEYS = new Set(["name", "short_name", "sortable_name", "display_name", "user_name", "author_name"]);
+const USER_PRIVATE_KEYS = new Set([
+  "login_id",
+  "sis_user_id",
+  "sis_login_id",
+  "email",
+  "avatar_url",
+  "integration_id",
+]);
+
 export class CanvasClient {
   readonly baseUrl: URL;
   readonly writeMode: WriteMode;
   readonly maxPages: number;
   readonly timeoutMs: number;
+  private readonly studentRosterCache = new Map<string, Promise<StudentIdentity[]>>();
+  private allStudentsCache?: Promise<StudentIdentity[]>;
 
   constructor(private readonly config: CanvasMcpConfig) {
     this.baseUrl = new URL(config.baseUrl);
@@ -167,11 +225,239 @@ export class CanvasClient {
     if (this.writeMode === "read_only") {
       throw new CanvasApiError("This Canvas MCP is configured as read_only.");
     }
+    if (this.writeMode === "teacher") {
+      if (isTeacherMutationAllowed(path)) return;
+      throw new CanvasApiError(
+        `Write mode teacher blocks account-level or administrative mutation: ${method} ${path}. Use CANVAS_WRITE_MODE=full only if you intentionally want unrestricted Canvas writes.`,
+      );
+    }
     if (!isStudentMutationAllowed(path)) {
       throw new CanvasApiError(
         `Write mode student blocks this mutation: ${method} ${path}. Set CANVAS_WRITE_MODE=full if you intentionally want arbitrary Canvas writes.`,
       );
     }
+  }
+
+  private aliasFor(courseId: string, userId: string, scope: "course" | "global"): string {
+    const digest = createHmac("sha256", this.config.redactionKey)
+      .update(`${this.baseUrl.origin}|${scope === "course" ? `course:${courseId}` : "global"}|user:${userId}`)
+      .digest("base64url")
+      .slice(0, 10);
+    return scope === "course" ? `student_${digest}` : `student_global_${digest}`;
+  }
+
+  private async courseStudents(courseId: string): Promise<StudentIdentity[]> {
+    const cached = this.studentRosterCache.get(courseId);
+    if (cached) return cached;
+
+    const pending = (async () => {
+      const result = await this.request<Record<string, unknown>[]>(
+        "GET",
+        `/api/v1/courses/${encodeURIComponent(courseId)}/enrollments`,
+        {
+          query: {
+            type: ["StudentEnrollment"],
+            include: ["current_points"],
+            per_page: 100,
+          },
+          paginate: true,
+          redact: false,
+        },
+      );
+
+      const byUser = new Map<string, StudentIdentity>();
+      for (const enrollment of result.data) {
+        const user = enrollment.user && typeof enrollment.user === "object"
+          ? enrollment.user as Record<string, unknown>
+          : {};
+        const rawId = enrollment.user_id ?? user.id;
+        if (rawId === undefined || rawId === null) continue;
+        const userId = String(rawId);
+
+        const identity: StudentIdentity = {
+          userId,
+          courseId,
+          courseAlias: this.aliasFor(courseId, userId, "course"),
+          globalAlias: this.aliasFor(courseId, userId, "global"),
+          identifiers: uniqueStrings([
+            user.name,
+            user.short_name,
+            user.sortable_name,
+            user.display_name,
+            user.login_id,
+            user.sis_user_id,
+            user.sis_login_id,
+            user.email,
+            enrollment.sis_user_id,
+          ]),
+        };
+
+        const existing = byUser.get(userId);
+        if (existing) {
+          existing.identifiers = uniqueStrings([...existing.identifiers, ...identity.identifiers]);
+        } else {
+          byUser.set(userId, identity);
+        }
+      }
+      return [...byUser.values()];
+    })();
+
+    this.studentRosterCache.set(courseId, pending);
+    return pending;
+  }
+
+  private async allTeacherStudents(): Promise<StudentIdentity[]> {
+    if (this.allStudentsCache) return this.allStudentsCache;
+
+    this.allStudentsCache = (async () => {
+      const courses = await this.request<Record<string, unknown>[]>(
+        "GET",
+        "/api/v1/courses",
+        {
+          query: {
+            enrollment_type: "teacher",
+            enrollment_state: "active",
+            per_page: 100,
+          },
+          paginate: true,
+          redact: false,
+        },
+      );
+
+      const rosters = await Promise.all(
+        courses.data
+          .map((course) => course.id)
+          .filter((courseId): courseId is string | number => courseId !== undefined && courseId !== null)
+          .map((courseId) => this.courseStudents(String(courseId))),
+      );
+
+      const deduped = new Map<string, StudentIdentity>();
+      for (const identity of rosters.flat()) {
+        const existing = deduped.get(identity.userId);
+        if (existing) {
+          existing.identifiers = uniqueStrings([...existing.identifiers, ...identity.identifiers]);
+        } else {
+          deduped.set(identity.userId, identity);
+        }
+      }
+      return [...deduped.values()];
+    })();
+
+    return this.allStudentsCache;
+  }
+
+  private redactWithIdentities(value: unknown, identities: StudentIdentity[], courseScoped: boolean): unknown {
+    const byId = new Map(identities.map((identity) => [
+      identity.userId,
+      courseScoped ? identity.courseAlias : identity.globalAlias,
+    ]));
+
+    const visit = (current: unknown): unknown => {
+      if (Array.isArray(current)) return current.map(visit);
+      if (typeof current === "string") return replaceKnownIdentifiers(current, identities, courseScoped);
+      if (!current || typeof current !== "object") return current;
+
+      const object = current as Record<string, unknown>;
+      const linkedId = ["id", "user_id", "student_id", "author_id"]
+        .map((key) => object[key])
+        .find((raw) => raw !== undefined && raw !== null && byId.has(String(raw)));
+      const linkedAlias = linkedId === undefined ? undefined : byId.get(String(linkedId));
+      const output: Record<string, unknown> = {};
+
+      for (const [key, raw] of Object.entries(object)) {
+        if (USER_ID_KEYS.has(key) && raw !== undefined && raw !== null) {
+          const alias = byId.get(String(raw));
+          output[key] = alias ?? visit(raw);
+          continue;
+        }
+
+        if (key === "id" && linkedAlias) {
+          output[key] = linkedAlias;
+          continue;
+        }
+
+        if (linkedAlias && USER_NAME_KEYS.has(key)) {
+          output[key] = linkedAlias;
+          continue;
+        }
+
+        if (linkedAlias && USER_PRIVATE_KEYS.has(key)) {
+          output[key] = "[redacted]";
+          continue;
+        }
+
+        output[key] = visit(raw);
+      }
+
+      return output;
+    };
+
+    return visit(value);
+  }
+
+  private async redactForTeacher(value: unknown, path: string, enabled: boolean): Promise<unknown> {
+    if (!enabled || this.writeMode !== "teacher") return value;
+    if (path === "/api/v1/users/self/profile") return value;
+
+    const courseId = courseIdFromPath(path);
+    const identities = courseId
+      ? await this.courseStudents(courseId)
+      : await this.allTeacherStudents();
+
+    return this.redactWithIdentities(value, identities, Boolean(courseId));
+  }
+
+  async teacherStudents(courseId: string): Promise<Record<string, unknown>[]> {
+    if (this.writeMode !== "teacher" && this.writeMode !== "full") {
+      throw new CanvasApiError("Teacher roster tools require CANVAS_WRITE_MODE=teacher or full.");
+    }
+
+    const raw = await this.request<Record<string, unknown>[]>(
+      "GET",
+      `/api/v1/courses/${encodeURIComponent(courseId)}/enrollments`,
+      {
+        query: {
+          type: ["StudentEnrollment"],
+          include: ["current_points"],
+          per_page: 100,
+        },
+        paginate: true,
+        redact: false,
+      },
+    );
+    const identities = await this.courseStudents(courseId);
+    const byId = new Map(identities.map((identity) => [identity.userId, identity.courseAlias]));
+
+    return raw.data.map((enrollment) => {
+      const user = enrollment.user && typeof enrollment.user === "object"
+        ? enrollment.user as Record<string, unknown>
+        : {};
+      const rawId = enrollment.user_id ?? user.id;
+      const studentRef = rawId === undefined || rawId === null ? undefined : byId.get(String(rawId));
+      return {
+        student_ref: studentRef,
+        enrollment_state: enrollment.enrollment_state,
+        course_section_id: enrollment.course_section_id,
+        grades: enrollment.grades,
+        last_activity_at: enrollment.last_activity_at,
+        total_activity_time: enrollment.total_activity_time,
+      };
+    }).filter((item) => item.student_ref);
+  }
+
+  async resolveStudentRef(courseId: string, studentRef: string): Promise<string> {
+    if (!studentRef.startsWith("student_")) {
+      throw new CanvasApiError("Teacher tools require a redacted student_ref, not a raw Canvas user id.");
+    }
+
+    const identities = await this.courseStudents(courseId);
+    const identity = identities.find((candidate) =>
+      candidate.courseAlias === studentRef || candidate.globalAlias === studentRef
+    );
+    if (!identity) {
+      throw new CanvasApiError("Could not resolve that student_ref in this course.");
+    }
+    return identity.userId;
   }
 
   private async parseResponse(response: Response): Promise<unknown> {
@@ -196,6 +482,7 @@ export class CanvasClient {
       bodyEncoding?: "form" | "json";
       paginate?: boolean;
       maxPages?: number;
+      redact?: boolean;
     } = {},
   ): Promise<ApiResult<T>> {
     const first = this.canvasUrl(path, options.query);
@@ -247,8 +534,13 @@ export class CanvasClient {
       }
 
       if (!options.paginate) {
+        const protectedData = await this.redactForTeacher(
+          data,
+          first.pathname,
+          options.redact !== false,
+        );
         return {
-          data: data as T,
+          data: protectedData as T,
           status: response.status,
           headers: headersObject(response.headers),
           pages: 1,
@@ -264,8 +556,14 @@ export class CanvasClient {
       nextUrl = candidate;
     }
 
+    const protectedData = await this.redactForTeacher(
+      allData,
+      first.pathname,
+      options.redact !== false,
+    );
+
     return {
-      data: allData as T,
+      data: protectedData as T,
       status: lastStatus,
       headers: headersObject(lastHeaders || new Headers()),
       pages,
