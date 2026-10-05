@@ -691,9 +691,13 @@ export function createServer(): McpServer {
   tool(
     server,
     "canvas_teacher_list_students",
-    "List students in a course using stable pseudonymous student_ref values. Real names, emails, login IDs, SIS IDs, avatar URLs, and raw Canvas user IDs are not returned.",
-    z.object({ course_id: id }),
-    async ({ course_id }, client) => client.teacherStudents(course_id),
+    "List students in a course using stable pseudonymous student_ref values. By default this returns only the minimum roster context needed to distinguish students. Set include_academic_context only when grades or activity data are actually needed. Real names, emails, login IDs, SIS IDs, avatar URLs, and raw Canvas user IDs are not returned.",
+    z.object({
+      course_id: id,
+      include_academic_context: z.boolean().default(false),
+    }),
+    async ({ course_id, include_academic_context }, client) =>
+      client.teacherStudents(course_id, include_academic_context),
   );
 
   tool(
