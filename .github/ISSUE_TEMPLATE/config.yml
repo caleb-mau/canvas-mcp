@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/caleb-mau/canvas-mcp/security
+    about: Do not post credentials or exploitable security issues publicly.
