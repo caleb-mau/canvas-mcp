@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
-import { CanvasApiError, CanvasClient, type HttpMethod, type Query } from "./canvas.js";
-import { loadConfig, redactedConfig } from "./config.js";
+import { CanvasApiError, CanvasClient, type HttpMethod, type Query } from "./canvas";
+import { loadConfig, redactedConfig } from "./config";
 
 const id = z.union([z.string(), z.number()]).transform(String);
 const scalar = z.union([z.string(), z.number(), z.boolean(), z.null()]);
