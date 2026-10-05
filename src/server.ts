@@ -1,7 +1,7 @@
-import { acceptedContent, inputRequired, inputResponse, McpServer } from "@modelcontextprotocol/server";
+import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 import { CanvasApiError, CanvasClient, type HttpMethod, type Query } from "./canvas";
-import { confirmationRequired, loadConfig, redactedConfig } from "./config";
+import { loadConfig, redactedConfig } from "./config";
 
 const id = z.union([z.string(), z.number()]).transform(String);
 const scalar = z.union([z.string(), z.number(), z.boolean(), z.null()]);
@@ -14,128 +14,87 @@ const fileReferenceSchema = z.object({
   file_name: z.string().optional(),
 }).strict();
 
-const confirmationSchema = z.object({
-  confirm: z.boolean().meta({ title: "Confirm Canvas change" }),
-});
-
-function compactPreview(value: unknown, maxLength = 420): string {
-  const text = String(value ?? "")
-    .replace(/<[^>]*>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (!text) return "(empty)";
-  return text.length > maxLength ? text.slice(0, maxLength) + "…" : text;
+export interface CanvasToolAnnotations {
+  readOnlyHint: boolean;
+  destructiveHint: boolean;
+  openWorldHint: boolean;
+  idempotentHint?: boolean;
 }
 
-async function assignmentTitle(
-  client: CanvasClient,
-  courseId: string,
-  assignmentId: string,
-): Promise<string> {
-  try {
-    const assignment = await client.get<Record<string, unknown>>(
-      "/api/v1/courses/" + encodeURIComponent(courseId) +
-      "/assignments/" + encodeURIComponent(assignmentId),
-    );
-    return typeof assignment.data.name === "string"
-      ? assignment.data.name
-      : "assignment " + assignmentId;
-  } catch {
-    return "assignment " + assignmentId;
+const READ_ONLY_TOOLS = new Set([
+  "canvas_status",
+  "canvas_get_profile",
+  "canvas_list_courses",
+  "canvas_get_course",
+  "canvas_list_assignments",
+  "canvas_get_assignment",
+  "canvas_get_grades",
+  "canvas_recently_graded",
+  "canvas_get_submission",
+  "canvas_list_my_submissions",
+  "canvas_list_modules",
+  "canvas_list_module_items",
+  "canvas_list_pages",
+  "canvas_get_page",
+  "canvas_list_discussions",
+  "canvas_get_discussion",
+  "canvas_list_files",
+  "canvas_get_file",
+  "canvas_activity_stream",
+  "canvas_list_quizzes",
+  "canvas_get_quiz",
+  "canvas_list_announcements",
+  "canvas_list_calendar_events",
+  "canvas_list_planner_items",
+  "canvas_list_conversations",
+  "canvas_get_conversation",
+  "canvas_teacher_list_students",
+  "canvas_teacher_list_submissions",
+  "canvas_teacher_get_submission",
+]);
+
+const DESTRUCTIVE_WRITE_TOOLS = new Set([
+  "canvas_submit_text",
+  "canvas_submit_url",
+  "canvas_submit_file",
+  "canvas_submit_local_file",
+  "canvas_download_file",
+  "canvas_post_discussion_entry",
+  "canvas_reply_to_discussion",
+  "canvas_send_message",
+  "canvas_teacher_grade_submission",
+  "canvas_teacher_message_student",
+  "canvas_api",
+]);
+
+export function canvasToolAnnotations(name: string): CanvasToolAnnotations {
+  if (READ_ONLY_TOOLS.has(name)) {
+    return {
+      readOnlyHint: true,
+      destructiveHint: false,
+      openWorldHint: false,
+    };
   }
-}
 
-async function confirmationMessage(
-  name: string,
-  args: any,
-  client: CanvasClient,
-): Promise<string | null> {
-  switch (name) {
-    case "canvas_submit_text": {
-      const title = await assignmentTitle(client, args.course_id, args.assignment_id);
-      return [
-        'Submit the text response to "' + title + '" in Canvas?',
-        "This will turn in the assignment. Drafting, reviewing, or editing alone does not submit anything.",
-        "Preview: " + compactPreview(args.body),
-      ].join("\n\n");
-    }
-    case "canvas_submit_url": {
-      const title = await assignmentTitle(client, args.course_id, args.assignment_id);
-      return [
-        'Submit this URL to "' + title + '" in Canvas?',
-        "This will turn in the assignment.",
-        "URL: " + args.url,
-      ].join("\n\n");
-    }
-    case "canvas_submit_file":
-    case "canvas_submit_local_file": {
-      const title = await assignmentTitle(client, args.course_id, args.assignment_id);
-      return [
-        'Upload and submit this file to "' + title + '" in Canvas?',
-        "No file will be downloaded, uploaded, or submitted unless you confirm.",
-        "File: " + (
-          args.file?.file_name ||
-          args.file?.file_id ||
-          args.file_path ||
-          "(unnamed file)"
-        ),
-      ].join("\n\n");
-    }
-    case "canvas_post_discussion_entry":
-      return [
-        "Post this discussion entry to Canvas?",
-        "Preview: " + compactPreview(args.message),
-      ].join("\n\n");
-    case "canvas_reply_to_discussion":
-      return [
-        "Post this discussion reply to Canvas?",
-        "Preview: " + compactPreview(args.message),
-      ].join("\n\n");
-    case "canvas_send_message":
-      return [
-        "Send this Canvas Inbox message?",
-        args.subject ? "Subject: " + args.subject : "No subject",
-        "Preview: " + compactPreview(args.body),
-      ].join("\n\n");
-    case "canvas_teacher_grade_submission": {
-      const title = await assignmentTitle(client, args.course_id, args.assignment_id);
-      const changes = [
-        args.posted_grade !== undefined ? "grade: " + args.posted_grade : null,
-        args.excuse !== undefined ? "excused: " + args.excuse : null,
-        args.late_policy_status !== undefined ? "late status: " + args.late_policy_status : null,
-        args.comment !== undefined ? "comment: " + compactPreview(args.comment, 240) : null,
-      ].filter(Boolean).join("\n");
-      return [
-        "Apply these changes to " + args.student_ref + ' for "' + title + '"?',
-        changes || "Submission metadata will be changed.",
-      ].join("\n\n");
-    }
-    case "canvas_teacher_message_student":
-      return [
-        "Send a Canvas Inbox message to " + args.student_ref + "?",
-        args.subject ? "Subject: " + args.subject : "No subject",
-        "Preview: " + compactPreview(args.body),
-      ].join("\n\n");
-    case "canvas_api":
-      return args.method === "GET"
-        ? null
-        : [
-            "Run raw Canvas mutation " + args.method + " " + args.path + "?",
-            "This is a low level API call and may change Canvas data.",
-          ].join("\n\n");
-    default:
-      return null;
+  if (name === "canvas_mark_module_item") {
+    return {
+      readOnlyHint: false,
+      destructiveHint: false,
+      openWorldHint: false,
+      idempotentHint: true,
+    };
   }
-}
 
-function cancelledConfirmation() {
-  return ok({
-    cancelled: true,
-    changed_canvas: false,
-    message: "Cancelled. Nothing was changed in Canvas.",
-  });
-}
+  if (DESTRUCTIVE_WRITE_TOOLS.has(name)) {
+    return {
+      readOnlyHint: false,
+      destructiveHint: true,
+      openWorldHint: name === "canvas_submit_file",
+    };
+  }
 
+  throw new Error("Missing Canvas tool annotations for " + name);
+}
 
 function apiPath(...parts: Array<string | number>): string {
   return "/api/v1/" + parts.map((part) => encodeURIComponent(String(part))).join("/");
@@ -183,45 +142,21 @@ function tool(
     {
       description,
       inputSchema,
+      annotations: canvasToolAnnotations(name),
       _meta: {
         securitySchemes: [{ type: "oauth2", scopes: ["mcp"] }],
         ...extraMeta,
       },
     },
-    async (args, ctx) => {
-    try {
-      const client = new CanvasClient(await loadConfig());
-      const message = await confirmationMessage(name, args, client);
-
-      if (message && confirmationRequired()) {
-        const view = inputResponse(ctx.mcpReq.inputResponses, "confirm");
-
-        if (view.kind === "elicit") {
-          if (view.action !== "accept") return cancelledConfirmation();
-
-          const confirmed = acceptedContent(
-            ctx.mcpReq.inputResponses,
-            "confirm",
-            confirmationSchema,
-          );
-          if (confirmed?.confirm !== true) return cancelledConfirmation();
-        } else {
-          return inputRequired({
-            inputRequests: {
-              confirm: inputRequired.elicit({
-                message,
-                requestedSchema: confirmationSchema,
-              }),
-            },
-          });
-        }
+    async (args) => {
+      try {
+        const client = new CanvasClient(await loadConfig());
+        return ok(await handler(args, client));
+      } catch (error) {
+        return fail(error);
       }
-
-      return ok(await handler(args, client));
-    } catch (error) {
-      return fail(error);
-    }
-  });
+    },
+  );
 }
 
 export function createServer(): McpServer {
@@ -229,7 +164,7 @@ export function createServer(): McpServer {
     { name: "canvas-mcp", version: "0.1.0" },
     {
       instructions:
-        "Reading Canvas and drafting school work are nonmutating. Never infer permission to submit from requests such as draft, write, solve, complete, review, or help with an assignment. Only call a submission tool when the user explicitly asks to submit or turn in the work. Submission, grading, messages, discussion posts, and raw mutating Canvas API calls require an end user confirmation step by default. Never use canvas_api to bypass confirmation or teacher privacy protections.",
+        "Reading Canvas and drafting school work are nonmutating. Never infer permission to submit from requests such as draft, write, solve, complete, review, or help with an assignment. Only call a submission tool when the user explicitly asks to submit or turn in the work. Consequential write tools are accurately marked destructive so capable MCP hosts such as ChatGPT can present their native approval UI before execution. Never use canvas_api to bypass write safeguards or teacher privacy protections.",
     },
   );
 
@@ -238,6 +173,7 @@ export function createServer(): McpServer {
     {
       description: "Verify the Canvas connection and show local configuration with the access token redacted.",
       inputSchema: z.object({}),
+      annotations: canvasToolAnnotations("canvas_status"),
       _meta: {
         securitySchemes: [{ type: "oauth2", scopes: ["mcp"] }],
       },
@@ -379,7 +315,7 @@ export function createServer(): McpServer {
   tool(
     server,
     "canvas_submit_text",
-    "Submit an assignment as an online text entry. Do not call this merely to draft, solve, write, complete, or review work. Call it only after the user explicitly asks to submit or turn in the assignment; the server then requests end user confirmation.",
+    "Submit an assignment as an online text entry. Do not call this merely to draft, solve, write, complete, or review work. Call it only after the user explicitly asks to submit or turn in the assignment. This tool is marked as a destructive write so capable hosts can require native approval before execution.",
     z.object({
       course_id: id,
       assignment_id: id,
@@ -396,7 +332,7 @@ export function createServer(): McpServer {
   tool(
     server,
     "canvas_submit_url",
-    "Submit an assignment as an online URL. Only use after the user explicitly asks to submit or turn it in. The server requests end user confirmation before Canvas is changed.",
+    "Submit an assignment as an online URL. Only use after the user explicitly asks to submit or turn it in. This tool is marked as a destructive write so capable hosts can require native approval before execution.",
     z.object({
       course_id: id,
       assignment_id: id,
@@ -413,7 +349,7 @@ export function createServer(): McpServer {
   tool(
     server,
     "canvas_submit_file",
-    "Submit a client supplied file to a Canvas assignment using Canvas's official upload flow. In ChatGPT, the model facing signature may display file as a string because ChatGPT represents connector managed files as opaque file handles. Pass the connector or uploaded file reference into the file parameter anyway. ChatGPT resolves that handle to the supported file object before the MCP server receives it. Do not use a local filesystem path with this tool. The file may originate from Google Drive, another connector, a user upload, or any compatible source. Only use after the user explicitly asks to submit or turn it in. Confirmation happens before any remote file download or Canvas upload begins.",
+    "Submit a client supplied file to a Canvas assignment using Canvas's official upload flow. In ChatGPT, the model facing signature may display file as a string because ChatGPT represents connector managed files as opaque file handles. Pass the connector or uploaded file reference into the file parameter anyway. ChatGPT resolves that handle to the supported file object before the MCP server receives it. Do not use a local filesystem path with this tool. The file may originate from Google Drive, another connector, a user upload, or any compatible source. Only use after the user explicitly asks to submit or turn it in. This tool is marked as a destructive write so capable hosts can require native approval before the remote file is downloaded and Canvas is changed.",
     z.object({
       course_id: id,
       assignment_id: id,
@@ -461,7 +397,7 @@ export function createServer(): McpServer {
   tool(
     server,
     "canvas_submit_local_file",
-    "Submit a file from the local filesystem to a Canvas assignment. This is intended for local stdio MCP clients that can see the user's filesystem. Do not use this tool for Google Drive, connector files, ChatGPT uploads, or hosted MCP file references. Only use after the user explicitly asks to submit or turn it in. Confirmation happens before Canvas upload begins.",
+    "Submit a file from the local filesystem to a Canvas assignment. This is intended for local stdio MCP clients that can see the user's filesystem. Do not use this tool for Google Drive, connector files, ChatGPT uploads, or hosted MCP file references. Only use after the user explicitly asks to submit or turn it in. This tool is marked as a destructive write so capable hosts can require native approval before Canvas is changed.",
     z.object({
       course_id: id,
       assignment_id: id,
