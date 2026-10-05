@@ -1,6 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { createMcpHandler } from "@modelcontextprotocol/server";
-import { createServer } from "./server.js";
+import { createServer } from "./server";
 
 const handler = createMcpHandler(() => createServer());
 
