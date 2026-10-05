@@ -10,6 +10,7 @@ export interface CanvasMcpConfig {
   writeMode: WriteMode;
   maxPages: number;
   timeoutMs: number;
+  redactionKey: string;
 }
 
 export interface StoredConfig {
@@ -18,6 +19,7 @@ export interface StoredConfig {
   writeMode?: WriteMode;
   maxPages?: number;
   timeoutMs?: number;
+  redactionKey?: string;
 }
 
 export function configPath(): string {
@@ -101,6 +103,11 @@ export async function loadConfig(): Promise<CanvasMcpConfig> {
       1_000,
       300_000,
     ),
+    redactionKey:
+      process.env.CANVAS_REDACTION_KEY?.trim() ||
+      process.env.MCP_AUTH_TOKEN?.trim() ||
+      stored.redactionKey?.trim() ||
+      accessToken,
   };
 }
 
@@ -126,6 +133,7 @@ export function redactedConfig(config: CanvasMcpConfig) {
     writeMode: config.writeMode,
     maxPages: config.maxPages,
     timeoutMs: config.timeoutMs,
+    privacyRedaction: config.writeMode === "teacher",
     configPath: configPath(),
   };
 }
