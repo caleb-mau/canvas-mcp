@@ -27,8 +27,9 @@ First class tools are included for:
 * Activity stream
 * Canvas Inbox conversations
 * Classic quizzes
+* Privacy preserving teacher roster, submission, grading, and messaging tools
 
-The `canvas_api` tool is also a low level escape hatch for any same origin Canvas REST endpoint under `/api/...`. That means uncommon district features and Canvas endpoints do not need to be individually wrapped before an MCP client can use them.
+In teacher mode, course scoped responses from both dedicated tools and `canvas_api` pass through the same student identity redaction layer.\n\nThe `canvas_api` tool is also a low level escape hatch for any same origin Canvas REST endpoint under `/api/...`. That means uncommon district features and Canvas endpoints do not need to be individually wrapped before an MCP client can use them.
 
 Canvas permissions are still the final authority. The MCP cannot do anything the configured Canvas account is not allowed to do.
 
@@ -65,9 +66,10 @@ Set these environment variables:
 | `CANVAS_BASE_URL` | yes | Your Canvas origin |
 | `CANVAS_ACCESS_TOKEN` | yes | Personal token created in Canvas settings |
 | `MCP_AUTH_TOKEN` | yes for remote mode | Secret used by your MCP client to authenticate to this server |
-| `CANVAS_WRITE_MODE` | no | `read_only`, `student`, or `full`. Default is `student` |
+| `CANVAS_WRITE_MODE` | no | `read_only`, `student`, `teacher`, or `full`. Default is `student` |
 | `CANVAS_MAX_PAGES` | no | Maximum Canvas pagination pages followed per tool call. Default is 20 |
 | `CANVAS_TIMEOUT_MS` | no | Canvas request timeout. Default is 30000 |
+| `CANVAS_REDACTION_KEY` | no | Optional secret used for stable teacher mode student aliases. Remote deployments fall back to `MCP_AUTH_TOKEN`; local mode falls back to the Canvas token |
 
 Generate `MCP_AUTH_TOKEN` as a long random secret. It is not your Canvas token.
 
@@ -161,11 +163,33 @@ Default mode. Allows normal student actions such as:
 
 The low level `canvas_api` tool is prevented from making arbitrary teacher or administrator mutations in this mode.
 
+### `teacher`
+
+Allows course and section level teacher actions such as grading, comments, assignment management, discussions, and other course scoped Canvas mutations.
+
+Teacher mode also turns on student identity pseudonymization. Before a Canvas response reaches the MCP model, known student identity fields are replaced with stable aliases such as:
+
+```
+student_R7K4Q2M8PZ
+```
+
+The server builds these aliases with HMAC SHA 256 using a private server side redaction key. The model does not receive the student's real Canvas user ID, name, email, login ID, SIS ID, or avatar URL.
+
+Dedicated teacher tools accept `student_ref` instead of a Canvas user ID. When the model grades, comments on, or messages a student, the server fetches the roster, recomputes the aliases, resolves the matching real user ID internally, and then calls Canvas. No alias database is required.
+
+Aliases are stable within a course as long as the redaction key stays the same. Global student aliases are used when a Canvas response does not belong to one course.
+
+The privacy layer also scans returned strings for known roster identifiers so names or emails repeated inside ordinary Canvas response fields are replaced when recognized.
+
+This is identity redaction, not magical detection of every possible piece of personal information. If a student types an unknown phone number, home address, or other personal detail into free form assignment content, the server may not know that value is identifying and cannot guarantee its removal.
+
+Teacher mode blocks account level administrative mutations. Use `full` only when that broader access is intentional.
+
 ### `full`
 
 Allows the low level API tool to make any same origin Canvas REST request supported by the configured token.
 
-Use this only when you intentionally want the full permission surface of the Canvas account.
+Full mode does not automatically apply teacher identity pseudonymization. Use it only when you intentionally want the full permission and data surface of the Canvas account.
 
 ## File submissions
 
